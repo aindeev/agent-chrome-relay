@@ -98,7 +98,7 @@
         </p>
         <div class="btn-row">
           <a class="btn btn-ink btn-lg" href="https://github.com/aindeev/agent-chrome-relay">Get it on GitHub</a>
-          <a class="btn btn-line btn-lg" href="https://github.com/aindeev/agent-chrome-relay#readme">Read the docs</a>
+          <a class="btn btn-line btn-lg" href="#agent-setup">Copy the setup prompt</a>
         </div>
       </div>
 
@@ -128,11 +128,13 @@
         <pre class="term-body" id="demoTerm" aria-live="off"><span class="p">$</span> agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com
 <span class="ok">✓</span> Example App
   <span class="dim">https://app.example.com/</span>  <span class="t">0.6 s</span>
-<span class="p">$</span> agent-browser snapshot -i &amp;&amp; agent-browser click @e5 &amp;&amp; agent-browser close
+<span class="p">$</span> agent-browser snapshot -i
 <span class="dim">- textbox "Search" [ref=e1]</span>
 <span class="dim">- link "Projects" [ref=e3]</span>
 <span class="dim">- button "New report" [ref=e5]</span>
+<span class="p">$</span> agent-browser click @e5
 <span class="ok">✓</span> Done  <span class="t">0.15 s</span>
+<span class="p">$</span> agent-browser close
 <span class="ok">✓</span> Browser closed</pre>
       </div>
 
@@ -396,6 +398,40 @@
       <p class="plate">Install</p>
       <h2 id="install-title">Set up once, <span class="hl">about two minutes</span></h2>
       <p class="lede">Needs macOS, Google Chrome, Node.js 20+ and <a href="https://github.com/vercel-labs/agent-browser">agent-browser</a>.</p>
+    </div>
+
+    <div class="agent-setup reveal" id="agent-setup">
+      <div class="agent-setup-head">
+        <div>
+          <p class="plate plate--sm">Fastest</p>
+          <h3>Let your agent set it up</h3>
+          <p class="step-note">Paste this into Claude Code, Codex or Cursor. It checks your Mac, runs setup, walks you through the one click only you can do, tests it, and teaches your other agents to use it.</p>
+        </div>
+        <button class="btn btn-ink copy-prompt" type="button" data-copy-target="#setup-prompt" aria-label="Copy the setup prompt">
+          <span class="cp-idle">Copy setup prompt</span><span class="cp-done">Copied. Paste it into your agent</span>
+        </button>
+      </div>
+      <pre class="prompt-box" id="setup-prompt" tabindex="0">Set up Chrome Relay on this Mac, so you and my other coding agents can use my signed-in Chrome from the command line, in background tabs.
+
+Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
+
+1. Check the basics: macOS, Google Chrome, Node.js 20+, git and python3. If agent-browser is missing, install it with `npm i -g agent-browser`. Ask me before installing anything else.
+2. Clone the repo to ~/agent-chrome-relay (if it&#x27;s already there, `git pull` instead), then run `bin/chrome-relay setup` from the clone and read its output.
+3. Loading the extension is my job, not yours. Tell me the exact path of the clone&#x27;s `extension` folder, then walk me through it: in each Chrome profile I want agents to use, open chrome://extensions, turn on Developer mode, click Load unpacked and pick that folder. Wait until I say it&#x27;s done.
+4. Run `chrome-relay doctor` and fix whatever it reports until every line is ok.
+5. Run `chrome-relay identities`, show me the profiles it found, and ask which email to use by default and which (if any) only for admin work.
+6. Smoke test with the default profile:
+   agent-browser --cdp &quot;$(chrome-relay url &lt;email&gt;)&quot; open https://github.com
+   agent-browser get title
+   agent-browser close
+   Then confirm with me that nothing moved on my screen.
+7. Make sure all my agents know how to use it. Claude Code already has it: setup linked the chrome-relay skill. For Codex, Cursor or other agents, propose a one-line addition to their global instructions (for example ~/.codex/AGENTS.md) that points to &lt;clone&gt;/skill/SKILL.md for any browser step that needs my logins. Show me the edit before you save it.
+
+Rules while you do this:
+- Never print, log or paste the URL from `chrome-relay url`. It contains this Mac&#x27;s secret.
+- Never type my passwords, never pick Google accounts and never complete a sign-in for me. If a page needs a login, stop and ask me.
+- Never drive my Chrome any other way: no --auto-connect, no --cdp 9222, no --headed, no Playwright attached to it and no AppleScript.</pre>
+      <p class="step-note">Also at <a href="setup-prompt.txt">agent-chrome-relay.aindeev.com/setup-prompt.txt</a>. Or do it by hand:</p>
     </div>
 
     <ol class="steps">

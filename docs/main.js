@@ -34,9 +34,10 @@
       const ok = document.execCommand('copy'); ta.remove(); return ok;
     }
   };
-  document.querySelectorAll('[data-copy]').forEach((btn) => {
+  document.querySelectorAll('[data-copy], [data-copy-target]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      if (!(await copyText(btn.dataset.copy))) return;
+      const text = btn.dataset.copyTarget ? document.querySelector(btn.dataset.copyTarget).textContent : btn.dataset.copy;
+      if (!(await copyText(text))) return;
       btn.classList.add('is-copied');
       clearTimeout(btn._t);
       btn._t = setTimeout(() => btn.classList.remove('is-copied'), 1600);
@@ -55,7 +56,9 @@
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const P = '<span class="p">$</span> ';
   const CMD1 = 'agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com';
-  const CMD2 = 'agent-browser snapshot -i && agent-browser click @e5 && agent-browser close';
+  const CMD2 = 'agent-browser snapshot -i';
+  const CMD3 = 'agent-browser click @e5';
+  const CMD4 = 'agent-browser close';
 
   let visible = false;
   let wake = null;
@@ -119,13 +122,19 @@
       await print('<span class="dim">- textbox "Search" [ref=e1]</span>', 70);
       await print('<span class="dim">- link "Projects" [ref=e3]</span>', 70);
       await print('<span class="dim">- button "New report" [ref=e5]</span>', 380);
+      render(P + '<span class="cur"></span>');
+      await step(400);
+      await type(CMD3);
       ghostState('is-on', 'show-refs', 'at-btn');
       await step(760);
       ghostState('is-on', 'show-refs', 'at-btn', 'clicked');
       btn.classList.add('is-pressed');
       await step(220);
       btn.classList.remove('is-pressed');
-      await print('<span class="ok">✓</span> Done  <span class="t">0.15 s</span>', 700);
+      await print('<span class="ok">✓</span> Done  <span class="t">0.15 s</span>', 600);
+      render(P + '<span class="cur"></span>');
+      await step(300);
+      await type(CMD4);
       ghostState();
       setCount(0);
       await print('<span class="ok">✓</span> Browser closed', 200);

@@ -567,3 +567,20 @@ h1, h2, h3 { font-family: var(--f-display); font-weight: 500; margin: 0; letter-
 .byline-links { display: inline-flex; gap: 10px; margin-left: 4px; }
 .byline-links a { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; border: var(--b) solid var(--rule); color: var(--ink-2); text-decoration: none; transition: color .15s, border-color .15s; }
 .byline-links a:hover { color: var(--ink); border-color: var(--ink); }
+
+/* "Let your agent set it up": a copyable prompt above the manual steps */
+.agent-setup { margin: 0 0 clamp(28px, 4vw, 44px); padding: clamp(20px, 3vw, 32px); background: #07090c; color: #e8f6ff; border: var(--b) solid var(--rule); box-shadow: 0 0 0 1px rgba(64, 200, 255, .12), 0 24px 70px -30px rgba(40, 190, 255, .45); }
+.agent-setup-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 18px 30px; margin-bottom: 18px; }
+.agent-setup h3 { margin: 8px 0 6px; font: 600 clamp(22px, 2.6vw, 30px)/1.15 var(--f-display); color: #fff; }
+.agent-setup .step-note { color: #a9bccb; max-width: 62ch; }
+.agent-setup .step-note a { color: #7fdcff; }
+.agent-setup .plate { color: #7fdcff; border-color: rgba(127, 220, 255, .5); }
+.copy-prompt { background: #e8f6ff; color: #07090c; border-color: #e8f6ff; white-space: nowrap; }
+.copy-prompt:hover { background: #fff; }
+.copy-prompt .cp-done { display: none; }
+.copy-prompt.is-copied .cp-idle { display: none; }
+.copy-prompt.is-copied .cp-done { display: inline; }
+.prompt-box { margin: 0 0 14px; max-height: 300px; overflow: auto; padding: 18px 20px; background: #0c1116; border: 1px solid rgba(127, 220, 255, .22); color: #cfe6f5; font: 13px/1.6 var(--f-mono); white-space: pre-wrap; word-break: break-word; }
+.prompt-box:focus-visible { outline: 2px solid #7fdcff; outline-offset: 2px; }
+.agent-setup .plate { background: transparent; }
+.agent-setup .plate::before, .agent-setup .plate::after { background: #7fdcff; }

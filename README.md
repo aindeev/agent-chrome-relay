@@ -10,7 +10,9 @@ logins, from the command line, **in background tabs**: nothing takes focus, no d
 
 ```bash
 agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com/
-agent-browser snapshot -i && agent-browser click @e5 && agent-browser close
+agent-browser snapshot -i          # the page's buttons, links and fields, each with a ref like @e5
+agent-browser click @e5
+agent-browser close
 ```
 
 It's opt-in: nothing installs the extension for you, and it only runs on Macs whose owner set it up.
@@ -30,6 +32,9 @@ agent-browser (CLI) ──ws──▶ relay (127.0.0.1:9333, LaunchAgent) ──
 - **CLI** (`bin/chrome-relay`): setup, the connection URL, diagnostics, audit trail.
 
 ## Setup (once per Mac, ~2 minutes)
+
+Fastest: paste [this prompt](https://agent-chrome-relay.aindeev.com/setup-prompt.txt) into Claude Code, Codex or
+Cursor and let your agent do it. By hand:
 
 Needs macOS, Google Chrome, Node.js 20+ and [`agent-browser`](https://github.com/vercel-labs/agent-browser)
 (`npm i -g agent-browser`).

@@ -1,0 +1,20 @@
+Set up Chrome Relay on this Mac, so you and my other coding agents can use my signed-in Chrome from the command line, in background tabs.
+
+Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
+
+1. Check the basics: macOS, Google Chrome, Node.js 20+, git and python3. If agent-browser is missing, install it with `npm i -g agent-browser`. Ask me before installing anything else.
+2. Clone the repo to ~/agent-chrome-relay (if it's already there, `git pull` instead), then run `bin/chrome-relay setup` from the clone and read its output.
+3. Loading the extension is my job, not yours. Tell me the exact path of the clone's `extension` folder, then walk me through it: in each Chrome profile I want agents to use, open chrome://extensions, turn on Developer mode, click Load unpacked and pick that folder. Wait until I say it's done.
+4. Run `chrome-relay doctor` and fix whatever it reports until every line is ok.
+5. Run `chrome-relay identities`, show me the profiles it found, and ask which email to use by default and which (if any) only for admin work.
+6. Smoke test with the default profile:
+   agent-browser --cdp "$(chrome-relay url <email>)" open https://github.com
+   agent-browser get title
+   agent-browser close
+   Then confirm with me that nothing moved on my screen.
+7. Make sure all my agents know how to use it. Claude Code already has it: setup linked the chrome-relay skill. For Codex, Cursor or other agents, propose a one-line addition to their global instructions (for example ~/.codex/AGENTS.md) that points to <clone>/skill/SKILL.md for any browser step that needs my logins. Show me the edit before you save it.
+
+Rules while you do this:
+- Never print, log or paste the URL from `chrome-relay url`. It contains this Mac's secret.
+- Never type my passwords, never pick Google accounts and never complete a sign-in for me. If a page needs a login, stop and ask me.
+- Never drive my Chrome any other way: no --auto-connect, no --cdp 9222, no --headed, no Playwright attached to it and no AppleScript.
