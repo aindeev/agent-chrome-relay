@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chrome Relay: your coding agents, in your Chrome, in the background</title>
+  <meta name="description" content="Chrome Relay lets Claude Code, Codex, Cursor and Paseo agents drive background tabs in your everyday Chrome, with your real logins, from the command line via the agent-browser CLI. Open source, MIT.">
+  <link rel="canonical" href="https://aindeev.github.io/agent-chrome-relay/">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="color-scheme" content="light">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Chrome Relay">
+  <meta property="og:title" content="Chrome Relay: your coding agents, in your Chrome, in the background">
+  <meta property="og:description" content="Let Claude Code, Codex, Cursor and Paseo drive background tabs in your everyday Chrome, with your real logins. No focus stealing, no remote-debugging dialog, ~0.15 s per command.">
+  <meta property="og:url" content="https://aindeev.github.io/agent-chrome-relay/">
+  <meta property="og:image" content="https://aindeev.github.io/agent-chrome-relay/icon-1024.png">
+  <meta property="og:image:width" content="1024">
+  <meta property="og:image:height" content="1024">
+  <meta property="og:image:alt" content="Chrome Relay icon: a glowing cyan mouse pointer with a motion trail">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Chrome Relay">
+  <meta name="twitter:description" content="Your coding agents, in your Chrome, in the background.">
+  <meta name="twitter:image" content="https://aindeev.github.io/agent-chrome-relay/icon-1024.png">
+
+  <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
+  <link rel="apple-touch-icon" href="icon-256.png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script>document.documentElement.classList.add('js')</script>
+  <script src="main.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar" id="top">
+  <a class="brand" href="#top" aria-label="Chrome Relay, back to top">
+    <img src="icon.png" srcset="icon.png 1x, icon-256.png 2x" width="28" height="28" alt="">
+    <span>Chrome Relay</span>
+  </a>
+  <nav class="topnav" aria-label="Primary">
+    <a href="#how">How it works</a>
+    <a href="#security">Security</a>
+    <a href="#install">Install</a>
+    <a class="btn btn-sm btn-ink" href="https://github.com/aindeev/agent-chrome-relay">
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="15" height="15"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </nav>
+</header>
+
+<main id="main">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="sea" aria-hidden="true">
+      <div class="sea-lines"></div>
+      <div class="sea-lines sea-lines--b"></div>
+      <span class="drifter d1"><i></i><i></i><i></i></span>
+      <span class="drifter d2"><i></i><i></i><i></i></span>
+      <span class="drifter d3"><i></i><i></i><i></i></span>
+      <span class="drifter d4"><i></i><i></i><i></i></span>
+    </div>
+
+    <div class="hero-inner">
+      <div class="wordmark reveal">
+        <span class="wordmark-icon"><img src="icon-256.png" width="256" height="256" alt=""></span>
+        <span class="wordmark-text">chrome relay</span>
+      </div>
+
+      <h1 id="hero-title" class="hero-title reveal">
+        <span class="hl">Your coding agents, in your Chrome</span> in the background.
+      </h1>
+      <p class="hero-sub reveal">
+        Chrome Relay lets <strong>Claude Code</strong>, <strong>Codex</strong>, <strong>Cursor</strong> and <strong>Paseo</strong>
+        drive background tabs in your everyday Chrome, with your real logins, from the command line via the
+        <code>agent-browser</code> CLI.
+      </p>
+
+      <div class="hero-cta reveal">
+        <div class="cmd-row">
+          <button class="cmd" type="button" data-copy="git clone https://github.com/aindeev/agent-chrome-relay" aria-label="Copy: git clone https://github.com/aindeev/agent-chrome-relay">
+            <span class="cmd-prompt" aria-hidden="true">$</span>
+            <span class="cmd-text">git clone https://github.com/aindeev/agent-chrome-relay</span>
+            <span class="cmd-copy" aria-hidden="true"><svg viewBox="0 0 16 16" width="15" height="15"><rect x="5" y="5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M11 5V2H2v9h3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></span>
+            <span class="cmd-done" aria-hidden="true">copied</span>
+          </button>
+          <a class="cmd-go" href="https://github.com/aindeev/agent-chrome-relay" aria-label="Get it on GitHub">
+            <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path d="M2 8h11M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+          </a>
+        </div>
+        <p class="badges">
+          <span class="badge badge-ink">MIT · open source</span>
+          <span class="badge">macOS · Chrome · Node 20+</span>
+        </p>
+        <div class="btn-row">
+          <a class="btn btn-ink btn-lg" href="https://github.com/aindeev/agent-chrome-relay">Get it on GitHub</a>
+          <a class="btn btn-line btn-lg" href="https://github.com/aindeev/agent-chrome-relay#readme">Read the docs</a>
+        </div>
+      </div>
+
+      <p class="works-with reveal" aria-label="Works with Claude Code, Codex, Cursor and Paseo">
+        <span class="ww-label">works with</span>
+        <span>Claude Code</span><span>Codex</span><span>Cursor</span><span>Paseo</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ DEMO ============ -->
+  <section class="demo-wrap" aria-label="Demo: an agent drives a background tab while you keep working">
+    <div class="stage reveal" id="stage">
+      <div class="term term--hero">
+        <div class="term-bar">
+          <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="term-title">~/app · claude code</span>
+        </div>
+        <pre class="term-body" id="demoTerm" aria-live="off"><span class="p">$</span> agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com
+<span class="ok">✓</span> Example App
+  <span class="dim">https://app.example.com/</span>  <span class="t">0.6 s</span>
+<span class="p">$</span> agent-browser snapshot -i &amp;&amp; agent-browser click @e5 &amp;&amp; agent-browser close
+<span class="dim">- textbox "Search" [ref=e1]</span>
+<span class="dim">- link "Projects" [ref=e3]</span>
+<span class="dim">- button "New report" [ref=e5]</span>
+<span class="ok">✓</span> Done  <span class="t">0.15 s</span>
+<span class="ok">✓</span> Browser closed</pre>
+      </div>
+
+      <div class="chrome" aria-hidden="true">
+        <div class="chrome-tabs">
+          <span class="lights"><i></i><i></i><i></i></span>
+          <span class="tgroup" id="agentsGroup"><i></i>Agents<b id="agentsCount">1</b></span>
+          <span class="ctab">Inbox</span>
+          <span class="ctab ctab--active">Q4 plan · Docs</span>
+          <span class="ctab ctab--hide-sm">Calendar</span>
+        </div>
+        <div class="chrome-omni"><span class="lock"></span>docs.example.com/q4-plan</div>
+        <div class="chrome-info">“Chrome Relay” started debugging this browser <span class="chrome-info-btn">Cancel</span></div>
+        <div class="chrome-page">
+          <div class="doc">
+            <div class="doc-h"></div>
+            <div class="doc-l w90"></div><div class="doc-l w80"></div><div class="doc-l w95"></div>
+            <div class="doc-l w60"></div>
+            <div class="doc-type"><span>Hiring plan for Q4: two more</span><i class="caret"></i></div>
+            <div class="doc-l w85"></div><div class="doc-l w70"></div>
+          </div>
+          <span class="you-tag">You, still typing here</span>
+        </div>
+
+        <div class="ghost is-on show-refs at-btn" id="ghost">
+          <div class="ghost-head">
+            <span class="ghost-dot"></span>
+            <span>background tab</span>
+            <span class="ghost-url">app.example.com</span>
+          </div>
+          <div class="ghost-page">
+            <div class="gp-nav"><span class="gp-search" data-ref="e1"></span><span class="gp-link" data-ref="e3"></span></div>
+            <div class="gp-rows"><i></i><i></i><i></i></div>
+            <span class="gp-btn" data-ref="e5">New report</span>
+            <span class="gp-pointer"><i></i><i></i><i></i></span>
+            <span class="gp-ripple"></span>
+          </div>
+          <div class="ghost-foot">only this agent sees it</div>
+        </div>
+      </div>
+    </div>
+    <p class="stage-caption reveal">The agent opens, reads and clicks in a tab you never see. Your window, your cursor and your focus stay yours.</p>
+  </section>
+
+  <!-- ============ FEATURES ============ -->
+  <section class="section" id="features" aria-labelledby="features-title">
+    <div class="section-head reveal">
+      <p class="plate">Why it feels different</p>
+      <h2 id="features-title">A real browser for agents that <span class="hl">stays out of your way</span></h2>
+    </div>
+
+    <div class="bento">
+      <article class="tile tile--wide reveal">
+        <h3>Nothing takes focus</h3>
+        <p>Agent tabs open <strong>inactive</strong>, tucked into a collapsed <strong>“Agents”</strong> tab group. You keep typing in your own tab; commands that could raise or focus the window are swallowed.</p>
+        <div class="mini-win" aria-hidden="true">
+          <div class="mini-tabs">
+            <span class="tgroup tgroup--static"><i></i>Agents<b>3</b></span>
+            <span class="ctab">Inbox</span><span class="ctab ctab--active">Q4 plan · Docs</span><span class="ctab ctab--hide-sm">Calendar</span>
+          </div>
+          <div class="mini-body">
+            <div class="mini-lines"><i></i><i></i><i></i></div>
+            <div class="mini-callouts">
+              <span class="mini-callout mini-callout--agent"><b>3</b> agent tabs, working, collapsed</span>
+              <span class="mini-callout"><i class="caret"></i> your tab keeps focus</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="tile reveal">
+        <h3>No “Allow remote debugging?”</h3>
+        <p>No debugging port at all. A small MV3 extension runs DevTools commands through <code>chrome.debugger</code>, so Chrome never asks. (It does show its “started debugging this browser” bar while agents work.)</p>
+        <div class="nodialog" aria-hidden="true">
+          <div class="nodialog-box"><b>Allow remote debugging?</b><span></span><span></span><em>Allow</em></div>
+        </div>
+      </article>
+
+      <article class="tile reveal">
+        <h3>Your real sessions</h3>
+        <p>Your logins, cookies and profiles, as they are. Pick a Chrome profile by email: work for one task, admin for another.</p>
+        <ul class="profiles" aria-label="Example profiles">
+          <li><span class="av">Y</span><code>you@company.com</code><em>work</em></li>
+          <li><span class="av av--alt">A</span><code>admin@company.com</code><em>admin</em></li>
+        </ul>
+        <pre class="snip"><span class="p">$</span> chrome-relay url admin@company.com</pre>
+      </article>
+
+      <article class="tile reveal">
+        <h3>Ultra fast</h3>
+        <p>No browser to launch, no screenshots to round-trip. Just your Chrome, already open.</p>
+        <div class="bars" role="img" aria-label="About 0.15 seconds per command, about 0.6 seconds to open a page">
+          <div class="bar-row"><span>per command</span><div class="bar"><i style="--w:25%"></i></div><b>~0.15 s</b></div>
+          <div class="bar-row"><span>open a page</span><div class="bar"><i style="--w:100%"></i></div><b>~0.6 s</b></div>
+        </div>
+      </article>
+
+      <article class="tile reveal">
+        <h3>Many agents at once</h3>
+        <p>Every agent gets its own endpoint and sees only the tabs it opened. Four agents, four private lanes, one Chrome.</p>
+        <ul class="lanes" aria-hidden="true">
+          <li><span>Claude Code</span><i></i><i></i></li>
+          <li><span>Codex</span><i></i></li>
+          <li><span>Cursor</span><i></i><i></i><i></i></li>
+          <li><span>Paseo</span><i></i></li>
+        </ul>
+      </article>
+
+      <article class="tile tile--wide reveal">
+        <h3>Sign-ins: hands-off, never credentials</h3>
+        <p>When a site bounces through Google and the right account is <strong>already signed in</strong>, the extension clicks the account and Continue for the agent. Agents never type credentials: a password, passkey or 2-step screen stops the hop and the agent asks you to sign in in your own window.</p>
+        <div class="flow" aria-hidden="true">
+          <div class="flow-step"><span class="flow-k">site</span>app.example.com</div>
+          <span class="flow-arrow"></span>
+          <div class="flow-step"><span class="flow-k">Google</span>choose account</div>
+          <span class="flow-split">
+            <span class="flow-out flow-out--ok"><b>✓</b> already signed in: clicked through</span>
+            <span class="flow-out flow-out--stop"><b>■</b> password · passkey · 2-step: <code>SIGN-IN NEEDED</code>, asks you</span>
+          </span>
+        </div>
+      </article>
+
+      <article class="tile reveal">
+        <h3>Popups stay hidden</h3>
+        <p>Popups and “open in new tab” links become new hidden tabs owned by the same agent. Popup sign-in flows that report back to their opener keep working.</p>
+      </article>
+
+      <article class="tile reveal">
+        <h3>1Password-friendly</h3>
+        <p>Chrome drops an extension’s debugger from pages that contain another extension’s frame, like 1Password’s menu on login forms. The agent’s commands wait while the extension re-attaches.</p>
+      </article>
+
+      <article class="tile reveal">
+        <h3>Cleans up after itself</h3>
+        <p>Tabs of an agent that has been silent for 30 minutes are closed. Your own tabs and tab groups are never touched.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section class="section" id="how" aria-labelledby="how-title">
+    <div class="section-head reveal">
+      <p class="plate">How it works</p>
+      <h2 id="how-title">Three small pieces, <span class="hl">one hop each</span></h2>
+    </div>
+
+    <div class="night reveal">
+      <ol class="pipeline" aria-label="Data path from the agent to the browser tab">
+        <li class="node">
+          <span class="node-k">CLI</span>
+          <b>agent-browser</b>
+          <span class="node-s">your agent runs it in a shell</span>
+        </li>
+        <li class="wire" aria-hidden="true"><span class="wire-label">ws</span><i></i></li>
+        <li class="node node--hot">
+          <span class="node-k">background service</span>
+          <b>relay</b>
+          <span class="node-s mono">127.0.0.1:9333</span>
+        </li>
+        <li class="wire" aria-hidden="true"><span class="wire-label">ws</span><i></i></li>
+        <li class="node">
+          <span class="node-k">MV3 extension</span>
+          <b>Chrome Relay</b>
+          <span class="node-s">one per Chrome profile</span>
+        </li>
+        <li class="wire" aria-hidden="true"><span class="wire-label">chrome.debugger</span><i></i></li>
+        <li class="node node--tab">
+          <span class="node-k">background</span>
+          <b>agent tab</b>
+          <span class="node-s">inactive, in “Agents”</span>
+        </li>
+      </ol>
+
+      <div class="explain">
+        <div>
+          <h3>The relay</h3>
+          <p>A local DevTools endpoint per agent. Each agent sees and controls only the tabs it opened; anything that would raise or focus the browser is swallowed.</p>
+        </div>
+        <div>
+          <h3>The extension</h3>
+          <p>Opens each agent tab inactive in a collapsed “Agents” group and runs DevTools commands in it via <code>chrome.debugger</code>. No remote-debugging port.</p>
+        </div>
+        <div>
+          <h3>The CLI</h3>
+          <p><code>chrome-relay</code> does setup, prints the connection URL for a profile, checks everything with <code>doctor</code> and reads the audit trail.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SECURITY ============ -->
+  <section class="section" id="security" aria-labelledby="security-title">
+    <div class="section-head reveal">
+      <p class="plate">Security</p>
+      <h2 id="security-title">Who gets to drive <span class="hl">your browser</span></h2>
+    </div>
+
+    <div class="sec-grid">
+      <ul class="checks reveal">
+        <li>
+          <span class="check" aria-hidden="true"></span>
+          <div><h3>A per-machine secret</h3><p>Generated at setup and stored readable only by you. It is embedded in the URL that <code>chrome-relay url</code> prints.</p></div>
+        </li>
+        <li>
+          <span class="check" aria-hidden="true"></span>
+          <div><h3>Only agent apps</h3><p>The connecting process must come from Claude Code, Codex, Cursor or Paseo. The relay looks the process up and checks the markers those apps set, then its parents.</p></div>
+        </li>
+        <li>
+          <span class="check" aria-hidden="true"></span>
+          <div><h3>Only your extension</h3><p>The extension side must be this checkout’s extension, checked by its <code>chrome-extension://</code> origin, and the connecting process must be Chrome.</p></div>
+        </li>
+        <li>
+          <span class="check" aria-hidden="true"></span>
+          <div><h3>Web pages are refused</h3><p>Any connection carrying a web page’s origin is turned away, even with the secret.</p></div>
+        </li>
+      </ul>
+
+      <aside class="honest reveal" aria-labelledby="honest-title">
+        <p class="plate plate--sm">Being honest</p>
+        <h3 id="honest-title">What it is not</h3>
+        <p>These checks keep other local tools, web pages and accidents out. They are <strong>not a boundary against malware already running as you</strong>, which could read the secret and fake the markers.</p>
+        <p class="honest-note">It is opt-in, too: nothing installs the extension for you, and it only runs on Macs whose owner set it up.</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============ AUDIT ============ -->
+  <section class="section" id="audit" aria-labelledby="audit-title">
+    <div class="section-head reveal">
+      <p class="plate">Audit trail</p>
+      <h2 id="audit-title">Every agent action, <span class="hl">written down</span></h2>
+      <p class="lede">One log file per day: who connected, pages, clicks, special keys, the agent’s own scripts, screenshots, popups and sign-in clicks. Typed text is stored only as a length, and URLs lose their query string.</p>
+    </div>
+
+    <div class="term term--audit reveal">
+      <div class="term-bar">
+        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="term-title">chrome-relay audit</span>
+        <span class="swipe" aria-hidden="true">scroll →</span>
+      </div>
+<pre class="term-body term-body--scroll" tabindex="0" aria-label="Example audit output"><span class="p">$</span> chrome-relay audit
+<span class="dim">14:02:11 k3f9qa claude you@company.com           </span> session start          <span class="dim">cwd=/Users/you/app</span>
+<span class="dim">14:02:11 k3f9qa claude you@company.com           </span> tab open               <span class="dim">tab=1832</span>
+<span class="dim">14:02:12 k3f9qa claude you@company.com           </span> page                   <span class="dim">tab=1832 url=</span><span class="hi">https://app.example.com/reports</span>
+<span class="dim">14:02:13 k3f9qa claude you@company.com           </span> click                  <span class="dim">tab=1832 x=412 y=288</span>
+<span class="dim">14:02:14 k3f9qa claude you@company.com           </span> type                   <span class="dim">tab=1832 </span><span class="hi">chars=24</span>
+<span class="dim">14:02:14 k3f9qa claude you@company.com           </span> key                    <span class="dim">tab=1832 key=Enter</span>
+<span class="dim">14:02:15 k3f9qa claude you@company.com           </span> screenshot             <span class="dim">tab=1832</span>
+<span class="dim">14:05:40 m81zpe codex  admin@company.com         </span> google sign-in click   <span class="dim">tab=1840 site=admin.example.com account=admin@company.com</span>
+<span class="dim">14:09:02 k3f9qa claude you@company.com           </span> session end            <span class="dim">tabs=1</span></pre>
+      <div class="audit-notes">
+        <span><i class="hi-dot"></i><code>chars=24</code> what was typed is never stored, only how much</span>
+        <span><i class="hi-dot"></i><code>?q=…</code> query strings are dropped from every URL</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ INSTALL ============ -->
+  <section class="section" id="install" aria-labelledby="install-title">
+    <div class="section-head reveal">
+      <p class="plate">Install</p>
+      <h2 id="install-title">Set up once, <span class="hl">about two minutes</span></h2>
+      <p class="lede">Needs macOS, Google Chrome, Node.js 20+ and <a href="https://github.com/vercel-labs/agent-browser">agent-browser</a>.</p>
+    </div>
+
+    <ol class="steps">
+      <li class="step reveal">
+        <span class="step-n">01</span>
+        <h3>Get agent-browser</h3>
+        <button class="cmd cmd--block" type="button" data-copy="npm i -g agent-browser" aria-label="Copy: npm i -g agent-browser">
+          <span class="cmd-prompt" aria-hidden="true">$</span><span class="cmd-text">npm i -g agent-browser</span>
+          <span class="cmd-copy" aria-hidden="true"><svg viewBox="0 0 16 16" width="15" height="15"><rect x="5" y="5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M11 5V2H2v9h3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></span>
+          <span class="cmd-done" aria-hidden="true">copied</span>
+        </button>
+      </li>
+      <li class="step reveal">
+        <span class="step-n">02</span>
+        <h3>Clone and run setup</h3>
+        <button class="cmd cmd--block" type="button" data-copy="git clone https://github.com/aindeev/agent-chrome-relay&#10;cd agent-chrome-relay &amp;&amp; bin/chrome-relay setup" aria-label="Copy the clone and setup commands">
+          <span class="cmd-prompt" aria-hidden="true">$</span><span class="cmd-text">git clone https://github.com/aindeev/agent-chrome-relay<br>cd agent-chrome-relay &amp;&amp; bin/chrome-relay setup</span>
+          <span class="cmd-copy" aria-hidden="true"><svg viewBox="0 0 16 16" width="15" height="15"><rect x="5" y="5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M11 5V2H2v9h3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></span>
+          <span class="cmd-done" aria-hidden="true">copied</span>
+        </button>
+        <p class="step-note">Creates the secret and the background service, finds your profiles, puts <code>chrome-relay</code> on your PATH and links the Claude Code skill. Safe to re-run.</p>
+      </li>
+      <li class="step reveal">
+        <span class="step-n">03</span>
+        <h3>Load the extension in each profile</h3>
+        <p class="path" aria-label="chrome://extensions, then Developer mode, then Load unpacked, then the repo's extension folder">
+          <code>chrome://extensions</code><span class="sep" aria-hidden="true"></span>Developer mode<span class="sep" aria-hidden="true"></span>Load unpacked<span class="sep" aria-hidden="true"></span><code>extension/</code>
+        </p>
+        <p class="step-note">Do it in every Chrome profile your agents should use, then check with <code>chrome-relay doctor</code>.</p>
+      </li>
+    </ol>
+
+    <div class="cmds reveal">
+      <p class="plate plate--sm">Commands</p>
+      <ul class="cmd-list">
+        <li><code><span class="p">$</span> chrome-relay setup</code><span>one-time setup; safe to re-run</span></li>
+        <li><code><span class="p">$</span> chrome-relay url [email]</code><span>connection URL for agent-browser, for a profile</span></li>
+        <li><code><span class="p">$</span> chrome-relay identities</code><span>profiles, their Google accounts, which account each site uses</span></li>
+        <li><code><span class="p">$</span> chrome-relay status</code><span>connected profiles and agents</span></li>
+        <li><code><span class="p">$</span> chrome-relay doctor</code><span>check everything and say how to fix it</span></li>
+        <li><code><span class="p">$</span> chrome-relay update</code><span>after <code>git pull</code>: restart the relay, reload the extension</span></li>
+        <li><code><span class="p">$</span> chrome-relay audit</code><span>the latest audit events</span></li>
+        <li><code><span class="p">$</span> chrome-relay logs</code><span>the latest relay log lines</span></li>
+        <li><code><span class="p">$</span> chrome-relay uninstall</code><span>remove the service, CLI link and skill</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ FAQ ============ -->
+  <section class="section section--narrow" id="faq" aria-labelledby="faq-title">
+    <div class="faq reveal">
+      <p class="plate plate--sm" id="faq-title">FAQ</p>
+      <details>
+        <summary>How do my agents know to use it?</summary>
+        <p>Setup links a skill into Claude Code, so every repo gets it. For Codex, Cursor and others, point them at the same skill file, for example with one line in your global agent instructions.</p>
+      </details>
+      <details>
+        <summary>Will Chrome show anything while agents work?</summary>
+        <p>Yes: Chrome shows its “Chrome Relay started debugging this browser” bar. You will not see the “Allow remote debugging?” dialog, because no debugging port is opened.</p>
+      </details>
+      <details>
+        <summary>Can an agent sign in for me?</summary>
+        <p>No. It can click through a Google account chooser when the right account is already signed in. Anything that needs a password, passkey or 2-step code stops, and the agent asks you to sign in in your own window.</p>
+      </details>
+      <details>
+        <summary>Does it work on Windows or Linux?</summary>
+        <p>Not today. Setup installs a macOS background service, so it needs a Mac with Google Chrome.</p>
+      </details>
+      <details>
+        <summary>How do I update or remove it?</summary>
+        <p>After <code>git pull</code>, run <code>chrome-relay update</code>. To remove it, run <code>chrome-relay uninstall</code> and remove the extension in each profile.</p>
+      </details>
+    </div>
+  </section>
+
+  <!-- ============ CTA ============ -->
+  <section class="cta-wrap" aria-labelledby="cta-title">
+    <a class="cta reveal" href="https://github.com/aindeev/agent-chrome-relay">
+      <span class="cta-glow" aria-hidden="true"></span>
+      <img class="cta-icon" src="icon-256.png" width="96" height="96" alt="">
+      <span class="cta-title" id="cta-title">Hand your agents a browser <span class="cta-sub">(not your passwords)</span></span>
+      <span class="cta-action">Get it on GitHub <span class="cta-arrow" aria-hidden="true">→</span></span>
+    </a>
+    <p class="cta-alt reveal">or <a href="https://github.com/aindeev/agent-chrome-relay#readme">read the docs</a></p>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="footer-top">
+    <a class="brand" href="#top">
+      <img src="icon.png" srcset="icon.png 1x, icon-256.png 2x" width="28" height="28" alt="">
+      <span>Chrome Relay</span>
+    </a>
+    <nav class="footer-links" aria-label="Footer">
+      <div>
+        <span class="footer-h">Project</span>
+        <a href="https://github.com/aindeev/agent-chrome-relay">GitHub</a>
+        <a href="https://github.com/aindeev/agent-chrome-relay#readme">Docs</a>
+        <a href="https://github.com/aindeev/agent-chrome-relay/issues">Issues</a>
+      </div>
+      <div>
+        <span class="footer-h">Open source</span>
+        <a href="https://github.com/aindeev/agent-chrome-relay/blob/main/LICENSE">MIT License</a>
+        <a href="https://github.com/vercel-labs/agent-browser">agent-browser</a>
+      </div>
+    </nav>
+  </div>
+  <p class="footer-fine">MIT licensed, open source. Chrome is a trademark of Google LLC; Chrome Relay is an independent project, not affiliated with Google.</p>
+  <div class="footer-sea" aria-hidden="true"><div class="sea-lines"></div></div>
+</footer>
+</body>
+</html>
