@@ -2,7 +2,7 @@
 
 # Chrome Relay
 
-**Website:** https://aindeev.github.io/agent-chrome-relay/
+**Website:** https://agent-chrome-relay.aindeev.com · Made by [Alexey Indeev](https://x.com/AlexeyIndeev) ([blog](https://read.aindeev.com), [X](https://x.com/AlexeyIndeev), [LinkedIn](https://www.linkedin.com/in/alexey-indeev/))
 
 
 Lets your coding agents (Claude Code, Codex, Cursor, Paseo) use **your everyday Chrome**, with your real

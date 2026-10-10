@@ -559,3 +559,11 @@ h1, h2, h3 { font-family: var(--f-display); font-weight: 500; margin: 0; letter-
   .js .reveal { opacity: 1; transform: none; }
   .wire i { display: none; }
 }
+
+/* byline under the hero: author, blog and socials */
+.byline { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 10px; margin: 18px 0 0; font-size: 14px; color: var(--ink-3); }
+.byline a { color: var(--ink-2); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 3px; }
+.byline a:hover { color: var(--ink); }
+.byline-links { display: inline-flex; gap: 10px; margin-left: 4px; }
+.byline-links a { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; border: var(--b) solid var(--rule); color: var(--ink-2); text-decoration: none; transition: color .15s, border-color .15s; }
+.byline-links a:hover { color: var(--ink); border-color: var(--ink); }
