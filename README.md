@@ -2,7 +2,15 @@
 
 # Chrome Relay
 
-**Website:** https://agent-chrome-relay.aindeev.com · Made by [Alexey Indeev](https://x.com/AlexeyIndeev) ([blog](https://read.aindeev.com), [X](https://x.com/AlexeyIndeev), [LinkedIn](https://www.linkedin.com/in/alexey-indeev/))
+<p align="center">
+  <a href="https://agent-chrome-relay.aindeev.com"><img alt="Website" src="https://img.shields.io/badge/website-agent--chrome--relay.aindeev.com-0b0d10?style=flat-square"></a>
+  <a href="https://read.aindeev.com"><img alt="Blog: The Leveraged Mind" src="https://img.shields.io/badge/blog-The%20Leveraged%20Mind-ff6719?style=flat-square&logo=substack&logoColor=white"></a>
+  <a href="https://x.com/AlexeyIndeev"><img alt="X: @AlexeyIndeev" src="https://img.shields.io/badge/X-@AlexeyIndeev-000000?style=flat-square&logo=x&logoColor=white"></a>
+  <a href="https://www.linkedin.com/in/alexey-indeev/"><img alt="LinkedIn: Alexey Indeev" src="https://img.shields.io/badge/LinkedIn-Alexey%20Indeev-0a66c2?style=flat-square&logo=linkedin&logoColor=white"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square"></a>
+</p>
+
+**Website:** https://agent-chrome-relay.aindeev.com
 
 
 Lets your coding agents (Claude Code, Codex, Cursor, Paseo) use **your everyday Chrome**, with your real
@@ -115,6 +123,18 @@ cd relay && npm install && npm test     # who may connect: secret, allowed apps,
 
 Logs: `chrome-relay logs` (`~/.chrome-relay/relay.log`). Testing extension changes: edit `extension/`, then
 `chrome-relay update`. `CHROME_RELAY_HOME` and `CHROME_RELAY_PORT` override the data folder and port.
+
+## About the author
+
+Made by **Alexey Indeev**, co-founder and CTO of [Spare](https://sparelabs.com). I write about building more
+with AI, whether you code or not, at **[The Leveraged Mind](https://read.aindeev.com)**.
+
+- Blog: https://read.aindeev.com
+- X: [@AlexeyIndeev](https://x.com/AlexeyIndeev)
+- LinkedIn: https://www.linkedin.com/in/alexey-indeev/
+- GitHub: [@aindeev](https://github.com/aindeev)
+
+Questions, ideas or bugs: open an [issue](https://github.com/aindeev/agent-chrome-relay/issues) or reach out on X.
 
 ## License
 
