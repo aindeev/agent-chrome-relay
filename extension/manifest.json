@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Chrome Relay",
+  "version": "0.8.1",
+  "description": "Lets your local coding agents (Claude Code, Codex, Cursor, Paseo) work in background tabs of this Chrome profile.",
+  "permissions": [
+    "debugger",
+    "tabs",
+    "tabGroups",
+    "storage",
+    "alarms",
+    "identity",
+    "identity.email",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Chrome Relay: your coding agents work in background tabs of this profile",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  }
+}

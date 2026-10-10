@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""Chrome Relay: your coding agents drive background tabs in your everyday Chrome.
+
+  chrome-relay setup               one-time setup (secret, background service, identities, skill); safe to re-run
+  chrome-relay url [email]         CDP URL for agent-browser, including this Mac's secret
+                                   agent-browser --cdp "$(chrome-relay url you@company.com)" open <url>
+  chrome-relay identities          Chrome profiles, their Google accounts, and which account each site uses
+  chrome-relay status              connected profiles and agents
+  chrome-relay doctor              check everything and say how to fix what's wrong
+  chrome-relay update [--force]    after `git pull`: restart the relay and reload the extension everywhere (waits for idle agents unless --force)
+  chrome-relay audit [N] [filter]  last N audit events (default 40), optionally only lines containing filter
+  chrome-relay logs [N]            last N relay log lines
+  chrome-relay uninstall           stop and remove the background service, CLI link and skill (keeps ~/.chrome-relay)
+"""
+import glob, hashlib, json, os, secrets, shutil, subprocess, sys, time, urllib.parse, urllib.request
+
+TOOL = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))   # tools/chrome-relay in your checkout
+EXT = os.path.join(TOOL, "extension")
+HOME = os.environ.get("CHROME_RELAY_HOME", os.path.expanduser("~/.chrome-relay"))
+PORT = 9333   # fixed: the extension dials this port
+LABEL = "com.chrome-relay"
+PLIST = os.path.expanduser(f"~/Library/LaunchAgents/{LABEL}.plist")
+CHROME = os.path.expanduser("~/Library/Application Support/Google/Chrome")
+SKILL_LINK = os.path.expanduser("~/.claude/skills/chrome-relay")
+
+
+def token():
+    return open(f"{HOME}/token").read().strip()
+
+
+def get(path, t=3):
+    sep = "&" if "?" in path else "?"
+    return json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}{path}{sep}token={token()}", timeout=t))
+
+
+def up():
+    try:
+        get("/status", 1)
+        return True
+    except Exception:
+        return False
+
+
+def kickstart(restart=False):
+    subprocess.run(["launchctl", "kickstart", *(["-k"] if restart else []), f"gui/{os.getuid()}/{LABEL}"], capture_output=True)
+
+
+def ensure_up():
+    if up():
+        return
+    kickstart()
+    for _ in range(20):
+        if up():
+            return
+        time.sleep(0.25)
+    sys.exit("Chrome Relay is not running: run `chrome-relay doctor`")
+
+
+def ids():
+    return json.load(open(f"{HOME}/identities.json"))
+
+
+def chrome_profiles():
+    """email -> Chrome profile directory, from Chrome's own Local State."""
+    try:
+        cache = json.load(open(f"{CHROME}/Local State"))["profile"]["info_cache"]
+    except Exception:
+        return {}
+    return {v["user_name"]: d for d, v in cache.items() if v.get("user_name")}
+
+
+def extension_id(folder):
+    """Chrome's ID for an unpacked extension: derived from the folder's absolute path."""
+    h = hashlib.sha256(os.path.realpath(folder).encode()).hexdigest()[:32]
+    return "".join(chr(ord("a") + int(c, 16)) for c in h)
+
+
+def setup():
+    os.makedirs(HOME, exist_ok=True)
+    # only this checkout's extension may connect to the relay (it checks the connection's origin)
+    cfg_path = f"{HOME}/config.json"
+    cfg = json.load(open(cfg_path)) if os.path.exists(cfg_path) else {}
+    cfg["extensionIds"] = sorted(set(cfg.get("extensionIds", [])) | {extension_id(EXT)})
+    json.dump(cfg, open(cfg_path, "w"), indent=2)
+    if not os.path.exists(f"{HOME}/token"):
+        old = os.umask(0o077)
+        open(f"{HOME}/token", "w").write(secrets.token_hex(32))
+        os.umask(old)
+        print("created this Mac's secret:", f"{HOME}/token")
+    os.chmod(f"{HOME}/token", 0o600)
+    # identities: keep what's there (hand-set rules, learned sites); add any new Chrome profiles
+    d = ids() if os.path.exists(f"{HOME}/identities.json") else {"profiles": {}, "sites": {"rules": {}, "learned": {}}}
+    for email, prof in chrome_profiles().items():
+        d["profiles"].setdefault(email, {"chromeProfile": prof, "use": ""})["chromeProfile"] = prof
+    json.dump(d, open(f"{HOME}/identities.json", "w"), indent=2)
+    print(f"identities: {len(d['profiles'])} Chrome profiles in {HOME}/identities.json (edit `use` and `sites.rules` as you like)")
+    # dependencies, background service, CLI on PATH, Claude Code skill
+    node = shutil.which("node") or sys.exit("needs Node.js 20+ on PATH")
+    subprocess.run(["npm", "install", "--silent", "--prefix", os.path.join(TOOL, "relay")], check=True)
+    os.makedirs(os.path.dirname(PLIST), exist_ok=True)
+    open(PLIST, "w").write(f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>{LABEL}</string>
+  <key>ProgramArguments</key><array><string>{node}</string><string>{TOOL}/relay/relay.mjs</string></array>
+  <key>WorkingDirectory</key><string>{TOOL}/relay</string>
+  <key>EnvironmentVariables</key><dict><key>CHROME_RELAY_HOME</key><string>{HOME}</string></dict>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>{HOME}/relay.out</string><key>StandardErrorPath</key><string>{HOME}/relay.out</string>
+</dict></plist>
+""")
+    subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"], capture_output=True)
+    subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", PLIST], check=True)
+    bindir = os.path.expanduser("~/.local/bin")
+    os.makedirs(bindir, exist_ok=True)
+    link = os.path.join(bindir, "chrome-relay")
+    if os.path.realpath(link) != os.path.realpath(__file__):
+        if os.path.lexists(link):
+            os.remove(link)
+        os.symlink(os.path.realpath(__file__), link)
+    os.makedirs(os.path.dirname(SKILL_LINK), exist_ok=True)
+    if os.path.lexists(SKILL_LINK):
+        os.remove(SKILL_LINK)
+    os.symlink(os.path.join(TOOL, "skill"), SKILL_LINK)
+    print(f"background service {LABEL} started; `chrome-relay` linked into {bindir}; Claude Code skill linked at {SKILL_LINK}")
+    print(f"""
+Last step, by hand, in EACH Chrome profile agents should use (nothing installs it for you):
+  1. open chrome://extensions in a window of that profile
+  2. turn on Developer mode (top right)
+  3. Load unpacked -> {EXT}
+Then run `chrome-relay doctor`.""")
+
+
+def doctor():
+    ok = True
+
+    def check(cond, good, fix):
+        nonlocal ok
+        ok &= bool(cond)
+        print(("  ok   " if cond else "  FIX  ") + (good if cond else fix))
+
+    tok = f"{HOME}/token"
+    check(os.path.exists(tok) and oct(os.stat(tok).st_mode)[-3:] == "600", "secret present and private", "secret missing or readable by others: run `chrome-relay setup`")
+    loaded = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"], capture_output=True).returncode == 0
+    check(loaded, "background service installed", "service not loaded: run `chrome-relay setup`")
+    try:
+        allowed = json.load(open(f"{HOME}/config.json")).get("extensionIds", [])
+    except Exception:
+        allowed = []
+    check(extension_id(EXT) in allowed, f"extension {extension_id(EXT)} allowed to connect", "this checkout's extension is not allowed yet: run `chrome-relay setup`")
+    check(up(), f"relay answering on 127.0.0.1:{PORT}", f"relay down: `chrome-relay update`; details in {HOME}/relay.out")
+    check(subprocess.run(["pgrep", "-x", "Google Chrome"], capture_output=True).returncode == 0, "Chrome running", "Chrome is not running: open it")
+    if up():
+        live = get("/status")["profiles"]
+        check(live, f"extension connected in: {', '.join(live)}", f"extension not connected in any profile: load it unpacked from {EXT} (see `chrome-relay setup` output)")
+        disk = json.load(open(f"{EXT}/manifest.json"))["version"]
+        try:
+            vers = get("/versions", 5)
+        except Exception:
+            vers = {}
+        for e, v in vers.items():
+            check(v == disk, f"{e} runs the current extension {disk}", f"{e} runs {v}, files are {disk}: run `chrome-relay update`")
+    print("all good" if ok else "fix the items above")
+
+
+def audit():
+    args = sys.argv[2:]
+    n = int(next((a for a in args if a.isdigit()), 40))
+    flt = next((a for a in args if not a.isdigit()), "")
+    lines = []
+    for f in sorted(glob.glob(f"{HOME}/audit/*.jsonl"))[-3:]:
+        lines += [l for l in open(f) if flt in l]
+    for l in lines[-n:]:
+        e = json.loads(l)
+        t, s, via, prof, ev = e.pop("t")[11:19], e.pop("s"), e.pop("via"), e.pop("profile"), e.pop("event")
+        print(f"{t} {s} {via:6} {prof:26} {ev:22} " + " ".join(f"{k}={v}" for k, v in e.items() if v is not None))
+
+
+def identities():
+    d = ids()
+    live = get("/status")["profiles"] if up() else []
+    print("Chrome profiles (pass the email to `chrome-relay url`):")
+    for email, p in d["profiles"].items():
+        print(f"  {email:30} {p.get('chromeProfile', ''):10} [{'connected' if email in live else 'not connected'}]  {p.get('use', '')}")
+        if p.get("googleAccounts"):
+            print(f"  {'':30} Google accounts signed in there: {', '.join(p['googleAccounts'])}")
+    print("\nGoogle account per site (hand-set rules, then learned):")
+    for k, v in {**d["sites"].get("learned", {}), **d["sites"].get("rules", {})}.items():
+        print(f"  {k:36} {v}")
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "help"
+    if cmd == "setup":
+        setup()
+    elif cmd == "url":
+        ensure_up()
+        email = sys.argv[2] if len(sys.argv) > 2 else ""
+        if email and email not in ids()["profiles"]:
+            sys.exit(f"unknown profile {email}; see `chrome-relay identities`")
+        query = {"token": token(), **({"profile": email} if email else {})}
+        print(f"ws://127.0.0.1:{PORT}/devtools/browser/agent?{urllib.parse.urlencode(query)}")
+    elif cmd == "status":
+        ensure_up()
+        print(json.dumps(get("/status"), indent=1))
+    elif cmd == "identities":
+        identities()
+    elif cmd == "doctor":
+        doctor()
+    elif cmd == "update":
+        busy = get("/status")["agents"] if up() else []
+        if busy and "--force" not in sys.argv:
+            sys.exit(f"{len(busy)} agent session(s) are using the relay; updating would cut them off. Retry later or add --force.")
+        kickstart(restart=True)
+        for _ in range(180):   # the extension reconnects within ~30s (it retries on a 30s alarm)
+            if up() and get("/status")["profiles"]:
+                break
+            time.sleep(0.25)
+        time.sleep(2)          # give other profiles a moment to reconnect too
+        print("relay restarted; reloading extension in:", get("/reload-extensions")["reloading"] or "no connected profiles yet: run `chrome-relay update` again in a minute")
+    elif cmd == "audit":
+        audit()
+    elif cmd == "logs":
+        os.system(f"tail -n {sys.argv[2] if len(sys.argv) > 2 else 30} {HOME}/relay.log")
+    elif cmd == "uninstall":
+        subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"], capture_output=True)
+        for p in (PLIST, os.path.expanduser("~/.local/bin/chrome-relay"), SKILL_LINK):
+            if os.path.lexists(p):
+                os.remove(p)
+        print(f"removed the service, CLI link and skill; {HOME} kept. Remove the extension from chrome://extensions in each profile.")
+    else:
+        print(__doc__)
+
+
+if __name__ == "__main__":
+    main()
