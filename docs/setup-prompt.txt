@@ -1,4 +1,4 @@
-Set up Chrome Relay on this Mac, so you and my other coding agents can use my signed-in Chrome from the command line, in background tabs.
+Set up Chrome Relay on this Mac, so you and my other AI agents can use my signed-in Chrome from the command line, in background tabs.
 
 Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
 
