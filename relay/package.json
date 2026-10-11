@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "description": "Local relay between coding agents (agent-browser) and the Chrome Relay extension",
-  "scripts": { "start": "node relay.mjs", "test": "node --test ../test/relay.test.mjs" },
+  "scripts": { "start": "node relay.mjs", "test": "node --test ../test/*.test.mjs" },
   "engines": { "node": ">=20" },
   "dependencies": { "ws": "^8.22.0" }
 }
