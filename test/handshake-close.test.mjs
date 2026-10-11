@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import WebSocket from '../relay/node_modules/ws/index.js';
 
 async function until(predicate) {
@@ -35,7 +36,7 @@ fi
   await new Promise((r) => reservation.listen(0, '127.0.0.1', r));
   const port = reservation.address().port;
   await new Promise((r) => reservation.close(r));
-  const child = spawn(process.execPath, ['relay/relay.mjs'], {
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../relay/relay.mjs', import.meta.url))], {
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CHROME_RELAY_HOME: home, CHROME_RELAY_PORT: String(port), CHROME_RELAY_CHECK_TREE: '0' }, stdio: 'ignore',
   });
   const status = async () => (await fetch(`http://127.0.0.1:${port}/status`)).json();
