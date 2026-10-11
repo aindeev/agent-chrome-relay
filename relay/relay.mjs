@@ -354,6 +354,7 @@ new WebSocketServer({ server, perMessageDeflate: false, maxPayload: 512 * 1024 *
     const extId = (origin.match(/^chrome-extension:\/\/([a-p]{32})$/) || [])[1];
     if (!extId || !allowedExtensionIds().includes(extId)) { log("refused extension connection from origin", origin || "(none)"); return ws.close(4003, "not the Chrome Relay extension"); }
     if (!(await isChrome(port))) { log("refused extension connection not from Chrome"); return ws.close(4003, "not Chrome"); }
+    if (ws.readyState !== 1) { log("extension disconnected during connection check"); return; }
     ws.off("message", hold);
     // One socket per profile, decided by arrival order (this check may finish after a later connection's):
     //  - same extension install reconnecting: the NEWER connection wins and the older one's waiting calls fail fast;
@@ -400,6 +401,7 @@ new WebSocketServer({ server, perMessageDeflate: false, maxPayload: 512 * 1024 *
   if (url.searchParams.get("token") !== TOKEN) { log("refused agent: missing or wrong secret"); return ws.close(4001, "Chrome Relay: wrong or missing secret; get the URL from `chrome-relay url`"); }
   const t0 = Date.now(); const who = await caller(port); const checkMs = Date.now() - t0;
   if (!who.app) { log("refused agent: not started by Claude Code, Codex, Cursor or Paseo:", who.command || who.pid); return ws.close(4003, "Chrome Relay only accepts Claude Code, Codex, Cursor and Paseo"); }
+  if (ws.readyState !== 1) { log("agent disconnected during connection check"); return; }
   const a = new Agent(ws, prof); a.app = who.app; a.sid = Math.random().toString(36).slice(2, 8); agents.add(a);
   audit(a, "session start", { pid: who.pid, claudeSession: who.claudeSession, paseoAgent: who.paseoAgent, codexThread: who.codexThread, agentBrowserSession: who.browserSession, cwd: who.cwd });
   log("agent connected", prof || "(default)", "via", who.app, `(check ${checkMs}ms)`);
