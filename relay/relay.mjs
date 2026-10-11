@@ -95,7 +95,7 @@ class Agent {
   send(m) { if (process.env.BRIDGE_TRACE && m.method && !/^(Network|Page\.lifecycle|Runtime\.console|Page\.frame)/.test(m.method)) log("<", m.method, m.sessionId || "", JSON.stringify(m.params || {}).slice(0, 160)); if (this.ws.readyState === 1) this.ws.send(JSON.stringify(m)); }
   ok(m, result = {}) { this.send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }); }
   err(m, message) { this.send({ id: m.id, error: { code: -32000, message }, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }); }
-  info(tabId) { return { targetId: `tab-${tabId}`, type: "page", title: "", url: "about:blank", attached: true, canAccessOpener: false }; }
+  info(tabId) { return { targetId: `tab-${tabId}`, type: "page", title: "", url: this.targetUrls?.get(tabId) || "about:blank", attached: true, canAccessOpener: false }; }
 
   async onMessage(m) {
     this.last = Date.now();
@@ -123,7 +123,12 @@ class Agent {
       case "Target.setDiscoverTargets": this.discover = !!P.discover; return this.ok(m);
       case "Target.getTargets": return this.ok(m, { targetInfos: [...this.tabs.keys()].map((t) => this.info(t)) });
       case "Target.getBrowserContexts": return this.ok(m, { browserContextIds: [] });
-      case "Target.getTargetInfo": return this.ok(m, { targetInfo: P.targetId ? this.info(Number(String(P.targetId).slice(4))) : { targetId: "browser", type: "browser", title: "", url: "", attached: true } });
+      case "Target.getTargetInfo": {
+        if (!P.targetId) return this.ok(m, { targetInfo: { targetId: "browser", type: "browser", title: "", url: "", attached: true } });
+        const tabId = Number(String(P.targetId).slice(4));
+        if (!this.tabs.has(tabId)) return this.err(m, "No target with given id found");
+        return this.ok(m, { targetInfo: this.info(tabId) });
+      }
       case "Target.createTarget": {
         const tc = Date.now(); const r = await extCall(p, { op: "create" }); const createMs = Date.now() - tc;
         if (r.error) return this.err(m, r.error);
@@ -141,7 +146,7 @@ class Agent {
       case "Target.closeTarget": { const tabId = Number(String(P.targetId).slice(4)); if (!this.tabs.has(tabId)) return this.err(m, "No target with given id found");
         const closed = await extCall(p, { op: "close", tabId });
         if (closed.error) return this.err(m, `could not close the tab: ${closed.error}`);   // still ours: the agent can retry
-        this.tabs.delete(tabId); this.ok(m, { success: true });
+        this.tabs.delete(tabId); this.targetUrls?.delete(tabId); this.mainFrames?.delete(tabId); this.ok(m, { success: true });
         return this.send({ method: "Target.detachedFromTarget", params: { sessionId: `tab-${tabId}`, targetId: `tab-${tabId}` } }); }
       default: return this.err(m, `${m.method} is not available through Chrome Relay`);
     }
@@ -237,10 +242,22 @@ class Agent {
   announce(tabId) {
     this.send({ method: "Target.attachedToTarget", params: { sessionId: `tab-${tabId}`, targetInfo: this.info(tabId), waitingForDebugger: false } });
   }
+  onTargetUrl(tabId, url) {
+    // CDP target metadata needs the committed URL, while audit storage keeps
+    // its existing query/fragment redaction.
+    (this.targetUrls ||= new Map()).set(tabId, url);
+    if (this.discover) this.send({ method: "Target.targetInfoChanged", params: { targetInfo: this.info(tabId) } });
+    const u = cleanUrl(url); (this.urls ||= new Map());
+    if (this.urls.get(tabId) !== u) { this.urls.set(tabId, u); audit(this, "page", { tab: tabId, url: u }); }
+  }
   onExtEvent(e) {
     if (!this.tabs.has(e.tabId)) return false;
     if (e.method === "Page.frameNavigated" && !e.params.frame.parentId) {
-      const u = cleanUrl(e.params.frame.url); (this.urls ||= new Map()); if (this.urls.get(e.tabId) !== u) { this.urls.set(e.tabId, u); audit(this, "page", { tab: e.tabId, url: u }); }
+      (this.mainFrames ||= new Map()).set(e.tabId, e.params.frame.id);
+      this.onTargetUrl(e.tabId, e.params.frame.url);
+    }
+    if (e.method === "Page.navigatedWithinDocument" && e.params.frameId === this.mainFrames?.get(e.tabId)) {
+      this.onTargetUrl(e.tabId, e.params.url);
     }
         if (e.method === "Runtime.bindingCalled" && e.params.name === BINDING) {
       // In order: `window.open(); w.location = url` sends "open" then "nav" back to back, and "nav" needs the tab "open" creates.
@@ -287,6 +304,8 @@ class Agent {
       : `the page cannot be automated: another extension (usually 1Password) put its frame in it, at ${d.url}. If that is a sign-in page, ask the person at this Mac to sign in in their own window, then retry.`;
     const w = this.paused.get(tabId); this.paused.delete(tabId); if (w) w.resolve();
     if (!this.tabs.delete(tabId)) return;
+    this.targetUrls?.delete(tabId);
+    this.mainFrames?.delete(tabId);
     this.popupGone(tabId);
     this.send({ method: "Target.detachedFromTarget", params: { sessionId: `tab-${tabId}`, targetId: `tab-${tabId}` } });
     this.send({ method: "Target.targetDestroyed", params: { targetId: `tab-${tabId}` } });
