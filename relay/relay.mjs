@@ -95,7 +95,7 @@ class Agent {
   send(m) { if (process.env.BRIDGE_TRACE && m.method && !/^(Network|Page\.lifecycle|Runtime\.console|Page\.frame)/.test(m.method)) log("<", m.method, m.sessionId || "", JSON.stringify(m.params || {}).slice(0, 160)); if (this.ws.readyState === 1) this.ws.send(JSON.stringify(m)); }
   ok(m, result = {}) { this.send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }); }
   err(m, message) { this.send({ id: m.id, error: { code: -32000, message }, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }); }
-  info(tabId) { return { targetId: `tab-${tabId}`, type: "page", title: "", url: "about:blank", attached: true, canAccessOpener: false }; }
+  info(tabId) { return { targetId: `tab-${tabId}`, type: "page", title: "", url: this.targetUrls?.get(tabId) || "about:blank", attached: true, canAccessOpener: false }; }
 
   async onMessage(m) {
     this.last = Date.now();
@@ -111,8 +111,18 @@ class Agent {
       if (this.paused.has(tabId)) await this.paused.get(tabId).promise;   // tab is re-attaching (see onPaused)
       if (!this.tabs.has(tabId)) return this.err(m, this.blocked || "tab was closed");
       this.auditCommand(tabId, m);
-      if (!child && SETUP.test(m.method)) { const list = this.setup.get(tabId) || []; list.push([m.method, m.params]); this.setup.set(tabId, list); }
       const r = await extCall(p, { op: "cdp", tabId, sessionId: child, method: m.method, params: m.params });
+      // Reattachment restores the successful active state, not every attempted
+      // command. A rejected enable must not poison later setup, and a domain
+      // the client disabled must not be silently re-enabled.
+      if (!r.error && !child) {
+        const list = this.setup.get(tabId) || [];
+        if (SETUP.test(m.method)) { list.push([m.method, m.params]); this.setup.set(tabId, list); }
+        else if (m.method.endsWith(".disable")) {
+          const enable = m.method.replace(/\.disable$/, ".enable");
+          if (SETUP.test(enable)) this.setup.set(tabId, list.filter(([method]) => method !== enable));
+        }
+      }
       return r.error ? this.err(m, r.error) : this.ok(m, r.result);
     }
     const P = m.params || {};
@@ -123,7 +133,12 @@ class Agent {
       case "Target.setDiscoverTargets": this.discover = !!P.discover; return this.ok(m);
       case "Target.getTargets": return this.ok(m, { targetInfos: [...this.tabs.keys()].map((t) => this.info(t)) });
       case "Target.getBrowserContexts": return this.ok(m, { browserContextIds: [] });
-      case "Target.getTargetInfo": return this.ok(m, { targetInfo: P.targetId ? this.info(Number(String(P.targetId).slice(4))) : { targetId: "browser", type: "browser", title: "", url: "", attached: true } });
+      case "Target.getTargetInfo": {
+        if (!P.targetId) return this.ok(m, { targetInfo: { targetId: "browser", type: "browser", title: "", url: "", attached: true } });
+        const tabId = Number(String(P.targetId).slice(4));
+        if (!this.tabs.has(tabId)) return this.err(m, "No target with given id found");
+        return this.ok(m, { targetInfo: this.info(tabId) });
+      }
       case "Target.createTarget": {
         const tc = Date.now(); const r = await extCall(p, { op: "create" }); const createMs = Date.now() - tc;
         if (r.error) return this.err(m, r.error);
@@ -141,7 +156,7 @@ class Agent {
       case "Target.closeTarget": { const tabId = Number(String(P.targetId).slice(4)); if (!this.tabs.has(tabId)) return this.err(m, "No target with given id found");
         const closed = await extCall(p, { op: "close", tabId });
         if (closed.error) return this.err(m, `could not close the tab: ${closed.error}`);   // still ours: the agent can retry
-        this.tabs.delete(tabId); this.ok(m, { success: true });
+        this.tabs.delete(tabId); this.targetUrls?.delete(tabId); this.mainFrames?.delete(tabId); this.ok(m, { success: true });
         return this.send({ method: "Target.detachedFromTarget", params: { sessionId: `tab-${tabId}`, targetId: `tab-${tabId}` } }); }
       default: return this.err(m, `${m.method} is not available through Chrome Relay`);
     }
@@ -149,7 +164,14 @@ class Agent {
   // Every agent tab: behave as focused (real clicks/typing land in a background tab) and route popups
   // (window.open, target=_blank links) into new background tabs owned by this agent instead of windows.
   async prepare(tabId, openerId) {
-    this.tabs.set(tabId, true); const p = this.p;
+    const p = this.p;
+    // Creation is asynchronous: the agent may disconnect before Chrome returns
+    // the new tab. Its normal close() sweep cannot see that tab yet.
+    if (this.closed) {
+      await extCall(p, { op: "close", tabId });
+      throw new Error("agent disconnected while the tab was being created");
+    }
+    this.tabs.set(tabId, true);
     const steps = [["Emulation.setFocusEmulationEnabled", { enabled: true }], ["Page.enable", {}], ["Runtime.enable", {}], ["Runtime.addBinding", { name: BINDING }],
       ["Page.addScriptToEvaluateOnNewDocument", { source: (Number.isSafeInteger(openerId) ? `window.__agentBridgeOpenerId=${openerId};` : "") + POPUP_SHIM, runImmediately: true }]];
     try { await Promise.all(steps.map(([method, params]) => extMust(p, { op: "cdp", tabId, method, params }))); }
@@ -157,6 +179,7 @@ class Agent {
     this.setup.set(tabId, steps.slice(1));
   }
   async onPageCall(tabId, raw) {
+    if (this.closed) return;
     let c; try { c = JSON.parse(raw); } catch { return; }
     // Everything here comes from page script: accept only an integer id and http(s) URLs, never splice page text into code.
     if (c === null || typeof c !== "object" || (c.id !== undefined && !Number.isSafeInteger(c.id))) return;
@@ -229,10 +252,22 @@ class Agent {
   announce(tabId) {
     this.send({ method: "Target.attachedToTarget", params: { sessionId: `tab-${tabId}`, targetInfo: this.info(tabId), waitingForDebugger: false } });
   }
+  onTargetUrl(tabId, url) {
+    // CDP target metadata needs the committed URL, while audit storage keeps
+    // its existing query/fragment redaction.
+    (this.targetUrls ||= new Map()).set(tabId, url);
+    if (this.discover) this.send({ method: "Target.targetInfoChanged", params: { targetInfo: this.info(tabId) } });
+    const u = cleanUrl(url); (this.urls ||= new Map());
+    if (this.urls.get(tabId) !== u) { this.urls.set(tabId, u); audit(this, "page", { tab: tabId, url: u }); }
+  }
   onExtEvent(e) {
     if (!this.tabs.has(e.tabId)) return false;
     if (e.method === "Page.frameNavigated" && !e.params.frame.parentId) {
-      const u = cleanUrl(e.params.frame.url); (this.urls ||= new Map()); if (this.urls.get(e.tabId) !== u) { this.urls.set(e.tabId, u); audit(this, "page", { tab: e.tabId, url: u }); }
+      (this.mainFrames ||= new Map()).set(e.tabId, e.params.frame.id);
+      this.onTargetUrl(e.tabId, e.params.frame.url);
+    }
+    if (e.method === "Page.navigatedWithinDocument" && e.params.frameId === this.mainFrames?.get(e.tabId)) {
+      this.onTargetUrl(e.tabId, e.params.url);
     }
         if (e.method === "Runtime.bindingCalled" && e.params.name === BINDING) {
       // In order: `window.open(); w.location = url` sends "open" then "nav" back to back, and "nav" needs the tab "open" creates.
@@ -279,11 +314,13 @@ class Agent {
       : `the page cannot be automated: another extension (usually 1Password) put its frame in it, at ${d.url}. If that is a sign-in page, ask the person at this Mac to sign in in their own window, then retry.`;
     const w = this.paused.get(tabId); this.paused.delete(tabId); if (w) w.resolve();
     if (!this.tabs.delete(tabId)) return;
+    this.targetUrls?.delete(tabId);
+    this.mainFrames?.delete(tabId);
     this.popupGone(tabId);
     this.send({ method: "Target.detachedFromTarget", params: { sessionId: `tab-${tabId}`, targetId: `tab-${tabId}` } });
     this.send({ method: "Target.targetDestroyed", params: { targetId: `tab-${tabId}` } });
   }
-  async close() { const p = this.p; if (p) for (const tabId of [...this.tabs.keys(), ...(this.orphans || [])]) extCall(p, { op: "close", tabId }); this.tabs.clear(); }
+  async close() { this.closed = true; const p = this.p; if (p) for (const tabId of [...this.tabs.keys(), ...(this.orphans || [])]) extCall(p, { op: "close", tabId }); this.tabs.clear(); }
 }
 
 import { execFile } from "node:child_process";
@@ -354,6 +391,7 @@ new WebSocketServer({ server, perMessageDeflate: false, maxPayload: 512 * 1024 *
     const extId = (origin.match(/^chrome-extension:\/\/([a-p]{32})$/) || [])[1];
     if (!extId || !allowedExtensionIds().includes(extId)) { log("refused extension connection from origin", origin || "(none)"); return ws.close(4003, "not the Chrome Relay extension"); }
     if (!(await isChrome(port))) { log("refused extension connection not from Chrome"); return ws.close(4003, "not Chrome"); }
+    if (ws.readyState !== 1) { log("extension disconnected during connection check"); return; }
     ws.off("message", hold);
     // One socket per profile, decided by arrival order (this check may finish after a later connection's):
     //  - same extension install reconnecting: the NEWER connection wins and the older one's waiting calls fail fast;
@@ -374,7 +412,8 @@ new WebSocketServer({ server, perMessageDeflate: false, maxPayload: 512 * 1024 *
     const p = { ws, next: 0, pending: new Map(), seq, client, prof }; profiles.set(prof, p); log("extension connected for", prof);
     const ping = setInterval(() => ws.readyState === 1 && extCall(p, { op: "ping" }), 20000);
     const config = () => extCall(p, { op: "config", siteAccounts: siteAccounts(), instance: INSTANCE }).catch(() => {});
-    config(); fs.watchFile(IDS, { interval: 2000 }, () => ws.readyState === 1 && config());
+    const onIdentitiesChange = () => ws.readyState === 1 && config();
+    config(); fs.watchFile(IDS, { interval: 2000 }, onIdentitiesChange);
     const onExt = (d) => {
       const m = JSON.parse(d);
       if (m.id) { const r = p.pending.get(m.id); p.pending.delete(m.id); return r && r(m); }
@@ -392,7 +431,7 @@ new WebSocketServer({ server, perMessageDeflate: false, maxPayload: 512 * 1024 *
       if (m.detached) for (const a of agents) a.onDetached(m.detached.tabId, m.detached);
     };
     ws.on("message", onExt); for (const d of early.splice(0)) onExt(d);
-    ws.on("close", () => { clearInterval(ping); if (profiles.get(prof) === p) profiles.delete(prof); log("extension gone for", prof);
+    ws.on("close", () => { clearInterval(ping); fs.unwatchFile(IDS, onIdentitiesChange); if (profiles.get(prof) === p) profiles.delete(prof); log("extension gone for", prof);
       for (const r of p.pending.values()) r({ error: "extension disconnected" }); });
     return;
   }
@@ -400,6 +439,7 @@ new WebSocketServer({ server, perMessageDeflate: false, maxPayload: 512 * 1024 *
   if (url.searchParams.get("token") !== TOKEN) { log("refused agent: missing or wrong secret"); return ws.close(4001, "Chrome Relay: wrong or missing secret; get the URL from `chrome-relay url`"); }
   const t0 = Date.now(); const who = await caller(port); const checkMs = Date.now() - t0;
   if (!who.app) { log("refused agent: not started by Claude Code, Codex, Cursor or Paseo:", who.command || who.pid); return ws.close(4003, "Chrome Relay only accepts Claude Code, Codex, Cursor and Paseo"); }
+  if (ws.readyState !== 1) { log("agent disconnected during connection check"); return; }
   const a = new Agent(ws, prof); a.app = who.app; a.sid = Math.random().toString(36).slice(2, 8); agents.add(a);
   audit(a, "session start", { pid: who.pid, claudeSession: who.claudeSession, paseoAgent: who.paseoAgent, codexThread: who.codexThread, agentBrowserSession: who.browserSession, cwd: who.cwd });
   log("agent connected", prof || "(default)", "via", who.app, `(check ${checkMs}ms)`);

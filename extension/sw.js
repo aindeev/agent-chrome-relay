@@ -18,6 +18,7 @@ const restored = chrome.storage.session.get(["agentTabs", "agentGroups"]).then(a
 
 let connecting = null;            // the one connection attempt in flight, if any
 let refusedUntil = 0;             // the relay said another Chrome profile owns this email: stay away for a while
+let cleanupPending = false;
 function connect() {
   if (Date.now() < refusedUntil) return Promise.resolve();
   // One attempt at a time, and one socket at a time: overlapping attempts would leave the relay talking to a
@@ -25,6 +26,10 @@ function connect() {
   if (connecting) return connecting;
   connecting = (async () => {
     await restored;
+    if (cleanupPending) {
+      try { await closeAgentTabs(); cleanupPending = false; }
+      catch (error) { console.warn("tab cleanup failed; will retry", error); return; }
+    }
     if (ws && ws.readyState <= 1) return;
     if (!email) email = (await chrome.identity.getProfileUserInfo({ accountStatus: "ANY" })).email || "unknown";
     // A stable id for this install, so the relay can tell "the same extension reconnecting" from "another profile".
@@ -37,7 +42,8 @@ function connect() {
     sock.onclose = (ev) => {
       if (ws === sock) ws = null;
       if (ev.code === 4009) {   // refused: this profile serves no agents, so drop what it holds and stop retrying for 5 minutes
-        refusedUntil = Date.now() + 5 * 60 * 1000; outbox.length = 0; closeAgentTabs();
+        refusedUntil = Date.now() + 5 * 60 * 1000; outbox.length = 0; cleanupPending = true;
+        closeAgentTabs().then(() => { cleanupPending = false; }).catch((error) => console.warn("tab cleanup failed; will retry", error));
       }                         // anything else is a blip: keep the tabs, the relay still has their agents (see "config")
     };
   })().finally(() => { connecting = null; });
@@ -49,12 +55,28 @@ async function closeAgentTabs() {
   // Take exactly the tabs tracked right now (a tab an agent opens meanwhile is not touched). Each id stays
   // recorded until its tab is gone, so if Chrome stops this worker midway the next start finishes the job.
   const ids = [...agentTabs];
-  for (const t of ids) closing.add(t);
-  for (const t of ids) {
-    await chrome.debugger.detach({ tabId: t }).catch(() => {});
-    await chrome.tabs.remove(t).catch(() => {});
-    agentTabs.delete(t); closing.delete(t); await remember();
-  }
+  for (const t of ids) await closeTrackedTab(t, true);
+}
+async function closeTrackedTab(tabId, detach = false) {
+  closing.add(tabId);
+  try {
+    if (detach) await chrome.debugger.detach({ tabId }).catch(() => {});
+    try { await chrome.tabs.remove(tabId); }
+    catch (error) {
+      // A removal error is only harmless if the tab is already gone. Otherwise
+      // retain ownership, including session storage, so the caller can retry.
+      if (error?.message !== `No tab with id: ${tabId}.`) {
+        let gone = false;
+        try { await chrome.tabs.get(tabId); }
+        catch (lookupError) {
+          if (lookupError?.message !== `No tab with id: ${tabId}.`) throw error;
+          gone = true;
+        }
+        if (!gone) throw error;
+      }
+    }
+    agentTabs.delete(tabId); await remember();
+  } finally { closing.delete(tabId); }
 }
 // Messages to the relay. While the socket is (re)connecting, e.g. right after Chrome restarted this worker,
 // they wait in a small queue instead of being dropped.
@@ -110,7 +132,7 @@ async function handle(m) {
       } catch (e) { /* tab groups unavailable (e.g. headless) */ }
       try { await chrome.debugger.attach({ tabId: tab.id }, "1.3"); }
       catch (err) {   // a tab we cannot drive is useless: do not leave it open
-        agentTabs.delete(tab.id); remember(); await chrome.tabs.remove(tab.id).catch(() => {});
+        await closeTrackedTab(tab.id).catch((e) => console.warn("tab cleanup failed", e));
         throw err;
       }
       return send({ id: m.id, result: { tabId: tab.id } });
@@ -119,7 +141,7 @@ async function handle(m) {
       const result = await chrome.debugger.sendCommand({ tabId: m.tabId, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }, m.method, m.params || {});
       return send({ id: m.id, result: result || {} });
     }
-    if (m.op === "close") { agentTabs.delete(m.tabId); remember(); await chrome.tabs.remove(m.tabId).catch(() => {}); return send({ id: m.id, result: {} }); }
+    if (m.op === "close") { await closeTrackedTab(m.tabId); return send({ id: m.id, result: {} }); }
   } catch (e) { send({ id: m.id, error: String(e && e.message || e) }); }
 }
 
@@ -208,7 +230,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     await chrome.debugger.attach({ tabId: tab.id }, "1.3");
     send({ adopted: { tabId: tab.id, openerTabId: tab.openerTabId } });
   } catch (e) {   // a tab we cannot drive: close it rather than leave an unmanaged tab an agent page opened
-    console.warn("adopt failed", e); agentTabs.delete(tab.id); remember(); chrome.tabs.remove(tab.id).catch(() => {});
+    console.warn("adopt failed", e); closeTrackedTab(tab.id).catch((err) => console.warn("tab cleanup failed", err));
   }
 });
 chrome.tabs.onRemoved.addListener(async (tabId) => { await restored;
