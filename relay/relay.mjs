@@ -111,8 +111,18 @@ class Agent {
       if (this.paused.has(tabId)) await this.paused.get(tabId).promise;   // tab is re-attaching (see onPaused)
       if (!this.tabs.has(tabId)) return this.err(m, this.blocked || "tab was closed");
       this.auditCommand(tabId, m);
-      if (!child && SETUP.test(m.method)) { const list = this.setup.get(tabId) || []; list.push([m.method, m.params]); this.setup.set(tabId, list); }
       const r = await extCall(p, { op: "cdp", tabId, sessionId: child, method: m.method, params: m.params });
+      // Reattachment restores the successful active state, not every attempted
+      // command. A rejected enable must not poison later setup, and a domain
+      // the client disabled must not be silently re-enabled.
+      if (!r.error && !child) {
+        const list = this.setup.get(tabId) || [];
+        if (SETUP.test(m.method)) { list.push([m.method, m.params]); this.setup.set(tabId, list); }
+        else if (m.method.endsWith(".disable")) {
+          const enable = m.method.replace(/\.disable$/, ".enable");
+          if (SETUP.test(enable)) this.setup.set(tabId, list.filter(([method]) => method !== enable));
+        }
+      }
       return r.error ? this.err(m, r.error) : this.ok(m, r.result);
     }
     const P = m.params || {};
