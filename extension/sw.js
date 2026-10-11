@@ -94,6 +94,20 @@ async function agentGroup(windowId) {
   const g = agentGroups.get(windowId);
   return g != null && (await chrome.tabGroups.get(g).catch(() => null)) ? g : null;
 }
+const grouping = new Map(); // one group update in flight per window
+async function groupAgentTab(tabId, windowId) {
+  const previous = grouping.get(windowId) || Promise.resolve();
+  const current = previous.catch(() => {}).then(async () => {
+    const existing = await agentGroup(windowId);
+    const groupId = await chrome.tabs.group({ tabIds: [tabId], ...(existing != null ? { groupId: existing } : { createProperties: { windowId } }) });
+    agentGroups.set(windowId, groupId); await remember();
+    await chrome.tabGroups.update(groupId, { title: "Agents", color: "grey", collapsed: true });
+    return groupId;
+  });
+  grouping.set(windowId, current);
+  try { return await current; }
+  finally { if (grouping.get(windowId) === current) grouping.delete(windowId); }
+}
 
 async function handle(m) {
   if (m.op === "ping") return send({ id: m.id, result: {} });
@@ -114,10 +128,7 @@ async function handle(m) {
       const tab = await chrome.tabs.create({ url: "about:blank", active: false, ...(win ? { windowId: win.id } : {}) });
       agentTabs.add(tab.id); remember();
       try {
-        const existing = await agentGroup(tab.windowId);
-        const groupId = await chrome.tabs.group({ tabIds: [tab.id], ...(existing != null ? { groupId: existing } : { createProperties: { windowId: tab.windowId } }) });
-        agentGroups.set(tab.windowId, groupId); remember();
-        await chrome.tabGroups.update(groupId, { title: "Agents", color: "grey", collapsed: true });
+        await groupAgentTab(tab.id, tab.windowId);
       } catch (e) { /* tab groups unavailable (e.g. headless) */ }
       try { await chrome.debugger.attach({ tabId: tab.id }, "1.3"); }
       catch (err) {   // a tab we cannot drive is useless: do not leave it open
@@ -214,8 +225,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
   if (opener && tab.windowId !== opener.windowId) await chrome.tabs.move(tab.id, { windowId: opener.windowId, index: -1 }).catch(() => {});  // popup window -> tab
   const back = lastActive.get(windowId);
   if (back != null) await chrome.tabs.update(back, { active: true }).catch(() => lastActive.delete(windowId));
-  const g = await agentGroup(windowId).catch(() => null);
-  if (g != null) await chrome.tabs.group({ tabIds: [tab.id], groupId: g }).catch(() => {});
+  await groupAgentTab(tab.id, windowId).catch(() => {});
   try {
     await chrome.debugger.attach({ tabId: tab.id }, "1.3");
     send({ adopted: { tabId: tab.id, openerTabId: tab.openerTabId } });
