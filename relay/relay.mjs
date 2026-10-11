@@ -375,7 +375,8 @@ new WebSocketServer({ server, perMessageDeflate: false, maxPayload: 512 * 1024 *
     const p = { ws, next: 0, pending: new Map(), seq, client, prof }; profiles.set(prof, p); log("extension connected for", prof);
     const ping = setInterval(() => ws.readyState === 1 && extCall(p, { op: "ping" }), 20000);
     const config = () => extCall(p, { op: "config", siteAccounts: siteAccounts(), instance: INSTANCE }).catch(() => {});
-    config(); fs.watchFile(IDS, { interval: 2000 }, () => ws.readyState === 1 && config());
+    const onIdentitiesChange = () => ws.readyState === 1 && config();
+    config(); fs.watchFile(IDS, { interval: 2000 }, onIdentitiesChange);
     const onExt = (d) => {
       const m = JSON.parse(d);
       if (m.id) { const r = p.pending.get(m.id); p.pending.delete(m.id); return r && r(m); }
@@ -393,7 +394,7 @@ new WebSocketServer({ server, perMessageDeflate: false, maxPayload: 512 * 1024 *
       if (m.detached) for (const a of agents) a.onDetached(m.detached.tabId, m.detached);
     };
     ws.on("message", onExt); for (const d of early.splice(0)) onExt(d);
-    ws.on("close", () => { clearInterval(ping); if (profiles.get(prof) === p) profiles.delete(prof); log("extension gone for", prof);
+    ws.on("close", () => { clearInterval(ping); fs.unwatchFile(IDS, onIdentitiesChange); if (profiles.get(prof) === p) profiles.delete(prof); log("extension gone for", prof);
       for (const r of p.pending.values()) r({ error: "extension disconnected" }); });
     return;
   }
