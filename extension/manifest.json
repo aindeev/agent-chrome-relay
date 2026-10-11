@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chrome Relay",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "Lets your local coding agents (Claude Code, Codex, Cursor, Paseo) work in background tabs of this Chrome profile.",
   "permissions": [
     "debugger",

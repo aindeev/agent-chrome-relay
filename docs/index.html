@@ -219,7 +219,7 @@
 
       <article class="tile reveal">
         <h3>Does the whole task on its own</h3>
-        <p>The agent uses the logins already in your Chrome, in the profile you pick by email, so it can work in Google Workspace, GitHub or any web app you are signed in to. It clicks through Google account pickers for accounts that are already signed in, and popups open as its own tabs. It stops to ask you only when a page needs a password, passkey or 2-step code.</p>
+        <p>The agent uses the logins already in your Chrome, in the profile you pick by email, so it can work in Google Workspace, GitHub or any web app you are signed in to. It clicks through Google account pickers for accounts that are already signed in, and popups open as its own tabs. It stops to ask you only when a page needs a password, passkey or 2-step code. If you choose, it can sign in with logins from the 1Password vaults you allow (passwords, 2-step codes and passkeys), without the agent ever seeing them. That part is optional and off until you set it up.</p>
         <div class="flow" aria-hidden="true">
           <div class="flow-step"><span class="flow-k">site</span>app.example.com</div>
           <span class="flow-arrow"></span>
@@ -367,7 +367,7 @@
     <div class="section-head reveal">
       <p class="plate">Install</p>
       <h2 id="install-title">Set it up <span class="hl">once per Mac</span></h2>
-      <p class="lede">It takes about two minutes. You need macOS, Google Chrome, Node.js 20+ and <a href="https://github.com/vercel-labs/agent-browser">agent-browser</a>.</p>
+      <p class="lede">It takes about two minutes. You need macOS, Google Chrome, <a href="https://go.dev/dl/">Go</a> and <a href="https://github.com/vercel-labs/agent-browser">agent-browser</a>. Signing in with 1Password and Secure Enclave passkeys also need Xcode’s command line tools; both are optional.</p>
     </div>
 
     <div class="agent-setup reveal" id="agent-setup">
@@ -385,8 +385,8 @@
 
 Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
 
-1. Check the basics: macOS, Google Chrome, Node.js 20+, git and python3. If agent-browser is missing, install it with `npm i -g agent-browser`. Ask me before installing anything else.
-2. Clone the repo to ~/agent-chrome-relay (if it&#x27;s already there, `git pull` instead), then run `bin/chrome-relay setup` from the clone and read its output.
+1. Check the basics: macOS, Google Chrome, git and Go 1.25+. If agent-browser is missing, install it with `npm i -g agent-browser`. Also check whether Xcode&#x27;s command line tools are installed (`xcode-select -p`): they&#x27;re optional, and only needed for signing in with 1Password and for Chrome Relay&#x27;s own passkeys. If they&#x27;re missing, tell me that and ask whether I want them. Ask me before installing anything else.
+2. Clone the repo to ~/agent-chrome-relay (if it&#x27;s already there, `git pull` instead). In the clone, run `./build`: it compiles Chrome Relay and signs it on this Mac (with my code-signing identity if I have one, otherwise ad-hoc). If it lists several identities, show me the list and ask which one to use, then run `./build --identity &quot;&lt;that name&gt;&quot;`. Tell me what its last lines say it built. Then run `./chrome-relay setup` and read its output.
 3. Loading the extension is my job, not yours. Tell me the exact path of the clone&#x27;s `extension` folder, then walk me through it: in each Chrome profile I want agents to use, open chrome://extensions, turn on Developer mode, click Load unpacked and pick that folder. Wait until I say it&#x27;s done.
 4. Run `chrome-relay doctor` and fix whatever it reports until every line is ok.
 5. Run `chrome-relay identities`, show me the profiles it found, and ask which email to use by default and which (if any) only for admin work.
@@ -396,10 +396,11 @@ Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
    agent-browser close
    Then confirm with me that nothing moved on my screen.
 7. Make sure all my agents know how to use it. Claude Code already has it: setup linked the chrome-relay skill. For Codex, Cursor or other agents, propose a one-line addition to their global instructions (for example ~/.codex/AGENTS.md) that points to &lt;clone&gt;/skill/SKILL.md for any browser step that needs my logins. Show me the edit before you save it.
+8. Signing in with 1Password is optional and off by default. Ask me whether I want my agents to sign in to some sites with logins from my 1Password (passwords, 2-step codes, passkeys). If not, skip this. If so, it needs the build with Xcode&#x27;s command line tools, and the 1Password app with Settings &gt; Developer &gt; &quot;Integrate with other apps&quot; turned on; point me to the README&#x27;s &quot;Signing in with 1Password&quot; section. Running `chrome-relay vault setup` is my job (it asks me which accounts and vaults, and 1Password asks me to approve); afterwards run `chrome-relay vault` and show me what agents can see.
 
 Rules while you do this:
 - Never print, log or paste the URL from `chrome-relay url`. It contains this Mac&#x27;s secret.
-- Never type my passwords, never pick Google accounts and never complete a sign-in for me. If a page needs a login, stop and ask me.
+- Never type my passwords, never pick Google accounts and never complete a sign-in for me. If a page needs a login, stop and ask me. Never ask me for a 1Password token or secret: I type those myself.
 - Never drive my Chrome any other way: no --auto-connect, no --cdp 9222, no --headed, no Playwright attached to it and no AppleScript.</pre>
       <p class="step-note">The same prompt is at <a href="setup-prompt.txt">agent-chrome-relay.aindeev.com/setup-prompt.txt</a>. To set it up by hand instead:</p>
     </div>
@@ -416,13 +417,13 @@ Rules while you do this:
       </li>
       <li class="step reveal">
         <span class="step-n">02</span>
-        <h3>Clone and run setup</h3>
-        <button class="cmd cmd--block" type="button" data-copy="git clone https://github.com/aindeev/agent-chrome-relay&#10;cd agent-chrome-relay &amp;&amp; bin/chrome-relay setup" aria-label="Copy the clone and setup commands">
-          <span class="cmd-prompt" aria-hidden="true">$</span><span class="cmd-text">git clone https://github.com/aindeev/agent-chrome-relay<br>cd agent-chrome-relay &amp;&amp; bin/chrome-relay setup</span>
+        <h3>Clone, build and run setup</h3>
+        <button class="cmd cmd--block" type="button" data-copy="git clone https://github.com/aindeev/agent-chrome-relay&#10;cd agent-chrome-relay &amp;&amp; ./build &amp;&amp; ./chrome-relay setup" aria-label="Copy the clone, build and setup commands">
+          <span class="cmd-prompt" aria-hidden="true">$</span><span class="cmd-text">git clone https://github.com/aindeev/agent-chrome-relay<br>cd agent-chrome-relay &amp;&amp; ./build &amp;&amp; ./chrome-relay setup</span>
           <span class="cmd-copy" aria-hidden="true"><svg viewBox="0 0 16 16" width="15" height="15"><rect x="5" y="5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M11 5V2H2v9h3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></span>
           <span class="cmd-done" aria-hidden="true">copied</span>
         </button>
-        <p class="step-note">This creates your Mac’s secret, starts the background service, finds your Chrome profiles, adds <code>chrome-relay</code> to your PATH and installs the Claude Code skill. It is safe to run again.</p>
+        <p class="step-note"><code>./build</code> compiles Chrome Relay and signs it on your Mac: with your code-signing identity if you have one, otherwise ad-hoc. Without Xcode’s command line tools it builds the core only, without 1Password and Secure Enclave passkeys, and says so. Setup creates your Mac’s secret, starts the background service, finds your Chrome profiles, adds <code>chrome-relay</code> to your PATH and installs the Claude Code skill. It is safe to run again.</p>
       </li>
       <li class="step reveal">
         <span class="step-n">03</span>
@@ -464,7 +465,11 @@ Rules while you do this:
       </details>
       <details>
         <summary>Can an agent sign in for me?</summary>
-        <p>No. Agents never type your passwords. If a Google account chooser shows an account that is already signed in, the extension picks it. If a page needs a password, passkey or 2-step code, the agent stops and asks you to sign in in your own window.</p>
+        <p>Not with your own passwords. If a Google account chooser shows an account that is already signed in, the extension picks it. If a page needs a password, passkey or 2-step code, the agent stops and asks you to sign in in your own window. If you want, you can let them sign in with 1Password (<code>chrome-relay vault setup</code>): you pick the accounts and vaults they may use. They fill a field with a reference like <code>op://Private/GitHub/password</code>, and the relay types the value, only on that item&#x27;s website. Agents never see it, and they can use 2-step codes and passkeys too. You approve with Touch ID, and Chrome Relay’s prompt names the agent, the item and the site.</p>
+      </details>
+      <details>
+        <summary>Do I have to use 1Password or passkeys?</summary>
+        <p>No. Chrome Relay works without them: background tabs, your existing logins, Google account pickers and the audit trail are the core. Signing in with 1Password stays off until you run <code>chrome-relay vault setup</code>, and <code>chrome-relay vault forget</code> turns it off again. <code>chrome-relay passkeys off</code> stops agent tabs from answering passkey requests. If you sign in with passkeys a lot, <code>chrome-relay passkeys reuse 120</code> lets one Touch ID cover an agent’s passkey sign-ins for two minutes. It is off by default.</p>
       </details>
       <details>
         <summary>Does it work on Windows or Linux?</summary>

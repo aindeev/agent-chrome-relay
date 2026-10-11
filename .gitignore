@@ -1,4 +1,7 @@
-node_modules/
 .local/
 __pycache__/
 .DS_Store
+extension/relay.json
+internal/macos/libsecure.a
+/chrome-relay
+/.signing-identity

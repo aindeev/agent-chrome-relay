@@ -9,7 +9,34 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  go:
+    # The relay, CLI, 1Password vault and passkeys. On macOS this also compiles the Secure Enclave / Keychain /
+    # Touch ID layer (Swift, linked in with cgo); on Linux that layer is a stub and everything else is tested.
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Secure Enclave layer (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          go generate ./internal/macos
+          echo "CGO_LDFLAGS=-L$(xcrun --show-sdk-path)/usr/lib/swift -L$(dirname $(xcrun -f swiftc))/../lib/swift/macosx" >> "$GITHUB_ENV"
+      - name: Vet
+        run: go vet ./...
+      - name: Tests (who may connect, tabs, audit, 1Password fills, passkeys, CLI)
+        run: go test -race ./...
+      - name: Core-only build (no Xcode tools, so no 1Password or Secure Enclave passkeys)
+        if: runner.os == 'macOS'
+        run: CGO_ENABLED=0 go test ./...
+
+  extension:
+    # The extension is JavaScript (Chrome requires it); its tests run its service worker under Node.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -19,12 +46,7 @@ jobs:
           node-version: 22
       - name: Syntax
         run: |
-          node --check relay/relay.mjs
           node --check extension/sw.js
-          python3 -m py_compile bin/chrome-relay
-          python3 -c "import json; json.load(open('extension/manifest.json'))"
-      - name: Tests (who may connect, audit trail)
-        working-directory: relay
-        run: |
-          npm ci
-          npm test
+          node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json', 'utf8'))"
+      - name: Tests (tab cleanup, Agents tab group)
+        run: node --test test/extension-*.test.mjs
