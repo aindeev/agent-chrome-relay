@@ -20,6 +20,9 @@ export function agentFixture(respond = async (m) => m.op === 'create' ? { tabId:
     Promise.resolve(respond(m)).then((result) => {
       const done = profile.pending.get(m.id); profile.pending.delete(m.id);
       if (done) done({ result });
+    }, (error) => {
+      const done = profile.pending.get(m.id); profile.pending.delete(m.id);
+      if (done) done({ error: error.message });
     });
   } } };
   context.fixture.profiles.set(profile.prof, profile);
