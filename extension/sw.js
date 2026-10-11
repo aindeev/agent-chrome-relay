@@ -1,7 +1,10 @@
 // Chrome Relay: connects this Chrome profile to the local relay (ws://127.0.0.1:9333) and runs
 // agents' DevTools commands in their own background tabs via chrome.debugger. Agent tabs are never
 // activated: they are created inactive and kept in one collapsed "Agents" tab group per window.
-const BRIDGE = "ws://127.0.0.1:9333/extension";
+// The relay's port: 9333, or what `chrome-relay setup` wrote to relay.json next to this file (a dev-mode install
+// from a second checkout runs its own relay on another port).
+const relayPort = (async () => Number((await (await fetch(chrome.runtime.getURL("relay.json"))).json()).port) || 9333)().catch(() => 9333);
+relayPort.then((port) => port !== 9333 && chrome.action.setTitle({ title: `Chrome Relay (dev mode, relay on port ${port})` }));
 let ws = null, email = "";
 const agentTabs = new Set();
 const agentGroups = new Map();    // windowId -> the tab group THIS extension created for agents (never matched by title)
@@ -35,7 +38,7 @@ function connect() {
     // A stable id for this install, so the relay can tell "the same extension reconnecting" from "another profile".
     let { clientId } = await chrome.storage.local.get(["clientId"]);
     if (!clientId) { clientId = crypto.randomUUID(); await chrome.storage.local.set({ clientId }); }
-    const sock = new WebSocket(`${BRIDGE}?profile=${encodeURIComponent(email)}&client=${clientId}`);
+    const sock = new WebSocket(`ws://127.0.0.1:${await relayPort}/extension?profile=${encodeURIComponent(email)}&client=${clientId}`);
     ws = sock;
     sock.onmessage = (e) => handle(JSON.parse(e.data)).catch((err) => console.warn(err));
     sock.onopen = flush;
@@ -122,6 +125,7 @@ async function handle(m) {
       if (m.instance) await chrome.storage.session.set({ relayInstance: m.instance }).catch(() => {});
       return send({ id: m.id, result: {} });
     }
+    if (m.op === "handoff") { handoffs.set(m.tabId, m.rpId || "a site"); showHandoffs(); return send({ id: m.id, result: {} }); }
     if (m.op === "version") return send({ id: m.id, result: { version: chrome.runtime.getManifest().version } });
     if (m.op === "create") {
       const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
@@ -156,16 +160,37 @@ chrome.debugger.onDetach.addListener(async (src, reason) => {
   if (closing.has(src.tabId)) return;   // we detached it ourselves while closing it
   const tabId = src.tabId; if (!agentTabs.has(tabId)) return;
   send({ paused: { tabId, reason } });
-  for (let i = 0; i < 175 && agentTabs.has(tabId); i++) {
+  // usually 35s; 5 minutes while a passkey waits for the person to approve it in 1Password's prompt
+  for (let i = 0; i < (handoffs.has(tabId) ? 1500 : 175) && agentTabs.has(tabId); i++) {
     await new Promise((r) => setTimeout(r, 200));
-    try { await chrome.debugger.attach({ tabId }, "1.3"); return send({ reattached: { tabId } }); } catch (e) {
+    try { await chrome.debugger.attach({ tabId }, "1.3"); clearHandoff(tabId); return send({ reattached: { tabId } }); } catch (e) {
       if (String(e).includes("No tab with given id")) break;
     }
   }
+  clearHandoff(tabId);
   if (!agentTabs.has(tabId)) return;
   const url = (await chrome.tabs.get(tabId).catch(() => ({}))).url || "";
   send({ detached: { tabId, reason: "blocked", url } });
 });
+// Passkeys only 1Password holds: the relay hands the request to 1Password's own prompt in the agent tab, which
+// needs the person. The toolbar icon shows a badge, and clicking it opens that tab (the only time an agent tab
+// is brought forward, and only by the person's click).
+const handoffs = new Map();   // tabId -> relying party waiting for approval
+function showHandoffs() {
+  const [rp] = handoffs.values();
+  chrome.action.setBadgeText({ text: handoffs.size ? "key" : "" }).catch(() => {});
+  chrome.action.setBadgeBackgroundColor({ color: "#d93025" }).catch(() => {});
+  if (handoffs.size) chrome.action.setTitle({ title: `Chrome Relay: an agent needs your passkey for ${rp}. Click to open its tab and approve in 1Password.` }).catch(() => {});
+  else relayPort.then((port) => chrome.action.setTitle({ title: port !== 9333 ? `Chrome Relay (dev mode, relay on port ${port})` : chrome.runtime.getManifest().action.default_title })).catch(() => {});
+}
+function clearHandoff(tabId) { if (handoffs.delete(tabId)) showHandoffs(); }
+chrome.action?.onClicked.addListener(async () => {   // (absent in the extension's test harness)
+  const [tabId] = handoffs.keys(); if (tabId == null) return;
+  const tab = await chrome.tabs.get(tabId).catch(() => null); if (!tab) return clearHandoff(tabId);
+  await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+});
+
 // Google sign-in hops (IAP, "Sign in with Google"): when the right account is ALREADY signed in, click it
 // and the "Continue"/"Allow" button, like you would. Never types anything: a password, passkey or
 // 2-step screen, or a signed-out account, stops the hop and is reported so the agent asks you.
@@ -236,6 +261,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
 chrome.tabs.onRemoved.addListener(async (tabId) => { await restored;
   // never try to re-activate a closed tab
   for (const [w, t] of lastActive) if (t === tabId) lastActive.delete(w);
+  clearHandoff(tabId);
   if (closing.has(tabId)) return; if (agentTabs.delete(tabId)) send({ detached: { tabId, reason: "closed" } }); });
 // The bridge may start later than Chrome: keep trying. Open WebSocket traffic keeps this worker alive.
 chrome.alarms.create("connect", { periodInMinutes: 0.5 });

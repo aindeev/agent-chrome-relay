@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Builds ./chrome-relay for this Mac and signs it: ./build [--identity "<codesigning identity>" | --identity -]
+#
+# Needs Go 1.25+. Optional:
+#   - Xcode's command line tools (swiftc): the 1Password and passkey features (Keychain, Secure Enclave, Touch ID).
+#     Without them it builds the core only: background tabs, Google sign-in hops, audit trail.
+#   - a code signing identity (any Apple Development or Developer ID certificate): macOS then ties Chrome Relay's
+#     Keychain item to your signature, so it survives rebuilds. Without one it signs ad-hoc ("-"), which works the
+#     same except macOS may ask once after each rebuild before Chrome Relay reads its own Keychain item.
+# Either way it uses the hardened runtime. The identity is, in order: --identity, $CHROME_RELAY_SIGN_IDENTITY, the
+# one a previous run saved in .signing-identity, the only one `security find-identity -v -p codesigning` lists, or
+# ad-hoc when there is none. With several and none chosen, it lists them and stops: it never picks one for you.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+die() { echo "build: $*" >&2; exit 1; }
+
+identity="" save=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --identity) [ $# -ge 2 ] || die "--identity needs a value"; identity="$2" save=1; shift 2 ;;
+    --identity=*) identity="${1#--identity=}" save=1; shift ;;
+    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown argument $1 (usage: ./build [--identity \"<codesigning identity>\" | --identity -])" ;;
+  esac
+done
+
+[ "$(uname -s)" = Darwin ] || die "Chrome Relay runs on macOS only"
+command -v go >/dev/null || die "needs Go 1.25 or later: https://go.dev/dl/ (or \`brew install go\`)"
+gov=$(go version | awk '{print $3}'); gov=${gov#go}
+major=${gov%%.*} minor=${gov#*.}; minor=${minor%%.*}; minor=${minor%%[!0-9]*}
+if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "${minor:-0}" -lt 25 ]; }; then
+  die "needs Go 1.25 or later (this is $(go version))"
+fi
+full=1
+if ! xcrun -f swiftc >/dev/null 2>&1; then
+  full=""
+  echo "build: no Xcode command line tools (swiftc): building the core only, without 1Password and passkeys." >&2
+  echo "       For those: \`xcode-select --install\`, then ./build again." >&2
+fi
+
+# The signing identity, before spending time on the build.
+identities=$(security find-identity -v -p codesigning | sed -n 's/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) "\(.*\)"$/\1 \2/p')
+names=$(printf '%s\n' "$identities" | cut -d' ' -f2- | sed '/^$/d')
+if [ -z "$identity" ] && [ -n "${CHROME_RELAY_SIGN_IDENTITY:-}" ]; then
+  identity="$CHROME_RELAY_SIGN_IDENTITY" save=1
+fi
+if [ -z "$identity" ] && [ -s .signing-identity ]; then
+  identity=$(head -n 1 .signing-identity)
+fi
+if [ -z "$identity" ]; then
+  count=$(printf '%s\n' "$names" | sed '/^$/d' | wc -l | tr -d ' ')
+  if [ "$count" = 1 ]; then
+    identity="$names"
+  elif [ "$count" = 0 ]; then
+    identity="-"
+  else
+    echo "Several code signing identities on this Mac; pick the one to sign Chrome Relay with:" >&2
+    printf '%s\n' "$names" | sed 's/^/  /' >&2
+    echo "then: ./build --identity \"<one of the above>\" (remembered in .signing-identity for next time)," >&2
+    echo "or ./build --identity - to sign ad-hoc." >&2
+    exit 1
+  fi
+fi
+# "-" (ad-hoc), a name, or the certificate's SHA-1 hash
+if [ "$identity" != "-" ] && ! printf '%s\n' "$identities" | awk -v id="$identity" '{ h = $1; $1 = ""; sub(/^ /, ""); if ($0 == id || h == id) f = 1 } END { exit !f }'; then
+  echo "build: \"$identity\" is not a valid code signing identity on this Mac. These are:" >&2
+  printf '%s\n' "$names" | sed 's/^/  /' >&2
+  exit 1
+fi
+
+version=$(git describe --always --dirty 2>/dev/null || echo dev)
+tmpbase=${TMPDIR:-/tmp}
+tmp=$(mktemp -d "${tmpbase%/}/chrome-relay-build.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+
+if [ -n "$full" ]; then
+  # secure.swift (Keychain, Secure Enclave, Touch ID) -> internal/macos/libsecure.a, linked in with cgo
+  go generate ./internal/macos
+  sdk=$(xcrun --show-sdk-path)
+  swiftlib="$(dirname "$(xcrun -f swiftc)")/../lib/swift/macosx"
+  CGO_ENABLED=1 CGO_LDFLAGS="${CGO_LDFLAGS:-} -L$sdk/usr/lib/swift -L$swiftlib" \
+    go build -trimpath -ldflags "-X main.version=$version" -o "$tmp/chrome-relay" ./cmd/chrome-relay
+else
+  CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$version" -o "$tmp/chrome-relay" ./cmd/chrome-relay
+fi
+
+# The hardened runtime, plus two exceptions the 1Password SDK needs (cmd/chrome-relay/entitlements.plist):
+#   allow-unsigned-executable-memory: it compiles WebAssembly at run time;
+#   disable-library-validation: to reach your 1Password app it loads the app's libop_sdk_ipc_client.dylib, signed
+#   by AgileBits (team 2BUA8C4S2C), not by you; library validation would refuse it.
+codesign --force --options runtime --timestamp=none --identifier chrome-relay \
+  --entitlements cmd/chrome-relay/entitlements.plist -s "$identity" "$tmp/chrome-relay"
+codesign --verify --strict "$tmp/chrome-relay"
+# into place in one step: the background service may be running the old one
+mv -f "$tmp/chrome-relay" ./chrome-relay
+
+if [ -n "$save" ]; then
+  printf '%s\n' "$identity" > .signing-identity
+fi
+what="with 1Password and passkeys"
+[ -n "$full" ] || what="core only (no 1Password or passkeys)"
+if [ "$identity" = "-" ]; then
+  echo "built ./chrome-relay $version, $what, signed ad-hoc"
+  echo "(a code signing identity would keep its Keychain item readable across rebuilds: see ./build --help)"
+else
+  echo "built ./chrome-relay $version, $what, signed by $identity"
+fi
+echo "first time: ./chrome-relay setup; after an update: chrome-relay update"
