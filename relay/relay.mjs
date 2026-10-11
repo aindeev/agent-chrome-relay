@@ -149,7 +149,14 @@ class Agent {
   // Every agent tab: behave as focused (real clicks/typing land in a background tab) and route popups
   // (window.open, target=_blank links) into new background tabs owned by this agent instead of windows.
   async prepare(tabId, openerId) {
-    this.tabs.set(tabId, true); const p = this.p;
+    const p = this.p;
+    // Creation is asynchronous: the agent may disconnect before Chrome returns
+    // the new tab. Its normal close() sweep cannot see that tab yet.
+    if (this.closed) {
+      await extCall(p, { op: "close", tabId });
+      throw new Error("agent disconnected while the tab was being created");
+    }
+    this.tabs.set(tabId, true);
     const steps = [["Emulation.setFocusEmulationEnabled", { enabled: true }], ["Page.enable", {}], ["Runtime.enable", {}], ["Runtime.addBinding", { name: BINDING }],
       ["Page.addScriptToEvaluateOnNewDocument", { source: (Number.isSafeInteger(openerId) ? `window.__agentBridgeOpenerId=${openerId};` : "") + POPUP_SHIM, runImmediately: true }]];
     try { await Promise.all(steps.map(([method, params]) => extMust(p, { op: "cdp", tabId, method, params }))); }
@@ -157,6 +164,7 @@ class Agent {
     this.setup.set(tabId, steps.slice(1));
   }
   async onPageCall(tabId, raw) {
+    if (this.closed) return;
     let c; try { c = JSON.parse(raw); } catch { return; }
     // Everything here comes from page script: accept only an integer id and http(s) URLs, never splice page text into code.
     if (c === null || typeof c !== "object" || (c.id !== undefined && !Number.isSafeInteger(c.id))) return;
@@ -283,7 +291,7 @@ class Agent {
     this.send({ method: "Target.detachedFromTarget", params: { sessionId: `tab-${tabId}`, targetId: `tab-${tabId}` } });
     this.send({ method: "Target.targetDestroyed", params: { targetId: `tab-${tabId}` } });
   }
-  async close() { const p = this.p; if (p) for (const tabId of [...this.tabs.keys(), ...(this.orphans || [])]) extCall(p, { op: "close", tabId }); this.tabs.clear(); }
+  async close() { this.closed = true; const p = this.p; if (p) for (const tabId of [...this.tabs.keys(), ...(this.orphans || [])]) extCall(p, { op: "close", tabId }); this.tabs.clear(); }
 }
 
 import { execFile } from "node:child_process";
