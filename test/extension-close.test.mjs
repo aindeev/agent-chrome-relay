@@ -20,7 +20,8 @@ test('a failed tab removal reports an error and remains retryable', async () => 
 test('restart cleanup retains failed tabs and retries before recording the new instance', async () => {
   let fail = true;
   const f = await extensionFixture({ saved: { agentTabs: [7], relayInstance: 'old' }, remove: async () => { if (fail) throw new Error('Chrome removal temporarily failed'); } });
-  await assert.rejects(f.handle({ op: 'config', id: 1, instance: 'new' }), /removal temporarily failed/);
+  await f.handle({ op: 'config', id: 1, instance: 'new' });
+  assert.match(f.messages.at(-1).error, /removal temporarily failed/);
   assert.equal(f.persisted.relayInstance, 'old');
   assert.deepEqual(f.persisted.agentTabs, [7]);
   fail = false;

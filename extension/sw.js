@@ -112,17 +112,17 @@ async function groupAgentTab(tabId, windowId) {
 async function handle(m) {
   if (m.op === "ping") return send({ id: m.id, result: {} });
   if (m.op === "reload") { send({ id: m.id, result: {} }); return chrome.runtime.reload(); }  // pick up a new version from disk
-  if (m.op === "config") {
-    siteAccounts = m.siteAccounts || {};
-    // A different relay instance means the relay restarted and its agents are gone: close the tabs it left.
-    const { relayInstance } = await chrome.storage.session.get(["relayInstance"]).catch(() => ({}));
-    if (m.instance && relayInstance && relayInstance !== m.instance) await closeAgentTabs();
-    // record the new instance only after cleanup finished, so an interrupted cleanup is retried
-    if (m.instance) await chrome.storage.session.set({ relayInstance: m.instance }).catch(() => {});
-    return send({ id: m.id, result: {} });
-  }
-  if (m.op === "version") return send({ id: m.id, result: { version: chrome.runtime.getManifest().version } });
   try {
+    if (m.op === "config") {
+      siteAccounts = m.siteAccounts || {};
+      // A different relay instance means the relay restarted and its agents are gone: close the tabs it left.
+      const { relayInstance } = await chrome.storage.session.get(["relayInstance"]).catch(() => ({}));
+      if (m.instance && relayInstance && relayInstance !== m.instance) await closeAgentTabs();
+      // record the new instance only after cleanup finished, so an interrupted cleanup is retried
+      if (m.instance) await chrome.storage.session.set({ relayInstance: m.instance }).catch(() => {});
+      return send({ id: m.id, result: {} });
+    }
+    if (m.op === "version") return send({ id: m.id, result: { version: chrome.runtime.getManifest().version } });
     if (m.op === "create") {
       const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
       const tab = await chrome.tabs.create({ url: "about:blank", active: false, ...(win ? { windowId: win.id } : {}) });
