@@ -202,9 +202,11 @@ agent-browser fill @e7 "op://Shared with Chrome Relay/Twilio/otp"   # the curren
   agent's** passkey sign-ins for 2 minutes (up to 300 seconds; the prompt says so; other agents still ask). Off by
   default. A site's "Create a passkey" (only right after the agent clicked or typed in the page, and while the
   Mac is unlocked) stores the public key in the vault, in an item of its own (*"GitHub passkey (you) · Chrome
-  Relay"*, tagged `chrome-relay-passkey`), in the vault that holds the site's login for that username, so a work
-  account's passkey stays in the work account. Chrome Relay never changes your own items: the only items it
-  edits are the ones it made. The chip's handle for the key stays in Chrome Relay's
+  Relay · Sam's MacBook Pro"*, tagged `chrome-relay-passkey`), in the vault that holds the site's login for that
+  username, so a work account's passkey stays in the work account. Chrome Relay never changes your own items: the
+  only items it edits are the ones it made. **Each Mac keeps its own:** a passkey's key is in one Mac's Secure
+  Enclave, so the item records which Mac (its name, and an ID derived from its hardware UUID). Other Macs sharing
+  the vaults neither use nor replace it; give an account a passkey on each Mac you use. The chip's handle for the key stays in Chrome Relay's
   own Keychain item, so only your `chrome-relay`, on this Mac, can use it. Passkeys made by an older Chrome Relay
   keep asking for Touch ID on the Mac itself.
 - **Your own 1Password passkeys** (your Google passkey, say) never leave 1Password: no program can read them.
