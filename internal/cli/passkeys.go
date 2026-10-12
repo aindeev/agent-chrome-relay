@@ -13,7 +13,7 @@ import (
 //
 //	chrome-relay passkeys                     what's set
 //	chrome-relay passkeys on | off            answer passkey requests in agent tabs, or leave pages' WebAuthn alone
-//	chrome-relay passkeys reuse <seconds|off> let one Touch ID cover an agent's passkey sign-ins for that long (max 300)
+//	chrome-relay passkeys reuse <seconds|off> let one approval cover an agent's passkey sign-ins for that long (max 300)
 func (c *cli) passkeys() error {
 	cfg := c.config()
 	pk, _ := cfg.get("passkeys").(*object)
@@ -33,7 +33,8 @@ func (c *cli) passkeys() error {
 			}
 			secs = n
 		}
-		pk.set("touchIdReuseSeconds", json.Number(strconv.Itoa(secs)))
+		pk.del("touchIdReuseSeconds") // its name before iPhone approvals
+		pk.set("approvalReuseSeconds", json.Number(strconv.Itoa(secs)))
 	default:
 		return fmt.Errorf("usage: %s passkeys [on | off | reuse <seconds|off>]", c.Name)
 	}
@@ -52,7 +53,11 @@ func (c *cli) passkeys() error {
 		return nil
 	}
 	reuse := 0
-	if n, ok := pk.get("touchIdReuseSeconds").(json.Number); ok {
+	n, ok := pk.get("approvalReuseSeconds").(json.Number)
+	if !ok {
+		n, ok = pk.get("touchIdReuseSeconds").(json.Number)
+	}
+	if ok {
 		v, _ := n.Int64()
 		reuse = int(min(v, 300))
 	}
@@ -64,9 +69,9 @@ func (c *cli) passkeys() error {
 	}
 	c.printf("Passkeys Chrome Relay made live in this Mac's Secure Enclave; ")
 	if reuse > 0 {
-		c.printf("one Touch ID covers an agent's passkey sign-ins for %d seconds.\n", reuse)
+		c.printf("one approval (Touch ID here, or Face ID on a paired iPhone) covers an agent's passkey sign-ins for %d seconds.\n", reuse)
 	} else {
-		c.printf("each sign-in asks for Touch ID.\n")
+		c.printf("each sign-in is approved with Touch ID here, or Face ID on a paired iPhone (`%s phone pair`).\n", c.Name)
 	}
 	c.printf("Passkeys only 1Password has go to 1Password's own prompt. Change with `%s passkeys on|off|reuse <seconds|off>`.\n", c.Name)
 	return nil

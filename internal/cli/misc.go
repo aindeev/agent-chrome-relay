@@ -219,6 +219,9 @@ func (c *cli) update() error {
 	if b, err := os.ReadFile(c.Plist); err != nil || !strings.Contains(string(b), "<string>"+xmlEscape(c.Bin)+"</string>") {
 		fmt.Fprintf(c.errw, "note: the background service does not run %s yet: `%s setup` switches it\n", c.Bin, c.Name)
 	}
+	if err := c.installNotifier(); err != nil {
+		return err
+	}
 	c.kickstart(true)
 	for range 180 { // the extension reconnects within ~30s (it retries on a 30s alarm)
 		if c.up() {

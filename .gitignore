@@ -5,3 +5,4 @@ extension/relay.json
 internal/macos/libsecure.a
 /chrome-relay
 /.signing-identity
+/Chrome Relay.app

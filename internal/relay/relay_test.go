@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -16,6 +17,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +27,7 @@ import (
 	op "github.com/1password/onepassword-sdk-go"
 	"github.com/gorilla/websocket"
 
+	"github.com/aindeev/agent-chrome-relay/internal/phone"
 	"github.com/aindeev/agent-chrome-relay/internal/vault"
 )
 
@@ -42,6 +46,7 @@ type harness struct {
 	store  *memStore
 	person *memPerson
 	chip   *softChip
+	peers  []*peer
 }
 
 func newHarness(t *testing.T) *harness {
@@ -57,10 +62,29 @@ func newHarness(t *testing.T) *harness {
 		store: &memStore{items: testItems()}, person: &memPerson{}, chip: &softChip{}}
 	s.caller = func(int) Caller { h.mu.Lock(); defer h.mu.Unlock(); return h.caller }
 	s.isChrome = func(int) bool { h.mu.Lock(); defer h.mu.Unlock(); return h.chrome }
-	s.vault = &vault.Vault{Settings: s.vaultSettings, Person: h.person, Connect: func(context.Context, string, string) (vault.Store, error) { return h.store, nil }}
+	s.vault = &vault.Vault{Settings: s.vaultSettings, Person: h.person, Connect: func(context.Context, string) (vault.Store, error) { return h.store, nil }}
 	s.chip = h.chip
 	h.srv = httptest.NewServer(s)
-	t.Cleanup(h.srv.Close)
+	t.Cleanup(func() {
+		// Close doesn't wait for hijacked WebSockets: let their goroutines finish writing the log and audit trail
+		// into home before the test removes it
+		h.mu.Lock()
+		for _, p := range h.peers {
+			p.ws.Close()
+		}
+		h.mu.Unlock()
+		h.srv.Close()
+		for range 200 {
+			s.mu.Lock()
+			idle := len(s.agents) == 0 && len(s.profiles) == 0
+			s.mu.Unlock()
+			if idle {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond)
+	})
 	return h
 }
 
@@ -89,6 +113,9 @@ func (h *harness) dial(path string, header http.Header) *peer {
 		h.t.Fatal(err)
 	}
 	p := &peer{t: h.t, ws: ws, taken: map[int]bool{}, done: make(chan struct{})}
+	h.mu.Lock()
+	h.peers = append(h.peers, p)
+	h.mu.Unlock()
 	go func() {
 		defer close(p.done)
 		for {
@@ -197,6 +224,7 @@ type fakeChrome struct {
 	focused any
 	value   string
 	fail    map[string]string // DevTools method -> error to answer with
+	late    bool              // the page loaded while the debugger was off
 }
 
 func (h *harness) extension(profile string) *fakeChrome {
@@ -217,6 +245,9 @@ func (h *harness) extension(profile string) *fakeChrome {
 			}
 			if m["method"] == "Runtime.evaluate" {
 				expr := fmt.Sprint(m["params"].(map[string]any)["expression"])
+				if strings.Contains(expr, "__agentBridgeLate") {
+					return map[string]any{"result": map[string]any{"type": "boolean", "value": f.late}}, ""
+				}
 				if strings.Contains(expr, "activeElement") {
 					return map[string]any{"result": map[string]any{"type": "object", "value": f.focused}}, ""
 				}
@@ -314,8 +345,12 @@ func TestTabsSetupReplayAndTargetInfo(t *testing.T) {
 	chrome := h.extension("me@example.com")
 	a := h.agent("me@example.com")
 	sid, tab := openTab(a, 1)
-	if n := len(chrome.all(func(m map[string]any) bool { return m["op"] == "cdp" && m["tabId"] == float64(tab) })); n != 6 {
-		t.Errorf("tab setup: %d DevTools commands, want 6 (focus, Page, Runtime, binding, popup script, passkey + quiet script)", n)
+	if n := len(chrome.all(func(m map[string]any) bool { return m["op"] == "cdp" && m["tabId"] == float64(tab) })); n != 8 {
+		t.Errorf("tab setup: %d DevTools commands, want 8 (focus, Page, Runtime, binding, popup script, passkey + quiet script, WebAuthn x2)", n)
+	}
+	auth := chrome.all(func(m map[string]any) bool { return m["method"] == "WebAuthn.addVirtualAuthenticator" })
+	if len(auth) != 1 || !strings.Contains(fmt.Sprint(auth[0]["params"]), "automaticPresenceSimulation:false") {
+		t.Error("Chrome's own passkey dialogs are kept out by an authenticator that never confirms:", auth)
 	}
 	cmd := func(n float64, method string) map[string]any {
 		a.send(map[string]any{"id": n, "sessionId": sid, "method": method, "params": map[string]any{}})
@@ -341,13 +376,33 @@ func TestTabsSetupReplayAndTargetInfo(t *testing.T) {
 	replayed := []string{}
 	for _, m := range chrome.all(func(map[string]any) bool { return true })[before:] {
 		if m["op"] == "cdp" && m["method"] != "Runtime.evaluate" {
-			replayed = append(replayed, fmt.Sprint(m["method"]))
+			if !strings.HasPrefix(fmt.Sprint(m["method"]), "WebAuthn.") {
+				replayed = append(replayed, fmt.Sprint(m["method"]))
+			}
 		}
 	}
 	if strings.Contains(strings.Join(replayed, ","), "Network.enable") || strings.Contains(strings.Join(replayed, ","), "Log.enable") ||
 		!strings.Contains(strings.Join(replayed, ","), "Page.setLifecycleEventsEnabled") || replayed[0] != "Emulation.setFocusEmulationEnabled" {
 		t.Error("replays only successful, still-active setup:", replayed)
 	}
+	if strings.Contains(strings.Join(replayed, ","), "Page.reload") {
+		t.Error("the same page, its scripts in place: no reload", replayed)
+	}
+	// a page that loaded while the debugger was off runs without the page scripts: it is loaded again
+	chrome.mu.Lock()
+	chrome.late = true
+	chrome.mu.Unlock()
+	before = len(chrome.all(func(map[string]any) bool { return true }))
+	chrome.send(map[string]any{"paused": map[string]any{"tabId": tab, "reason": "target_closed"}})
+	time.Sleep(50 * time.Millisecond)
+	chrome.send(map[string]any{"reattached": map[string]any{"tabId": tab}})
+	cmd(61, "Runtime.evaluate")
+	if len(chrome.all(func(m map[string]any) bool { return m["method"] == "Page.reload" })) != 1 {
+		t.Error("a page loaded without the scripts is reloaded once")
+	}
+	chrome.mu.Lock()
+	chrome.late = false
+	chrome.mu.Unlock()
 
 	a.send(map[string]any{"id": 7, "method": "Target.setDiscoverTargets", "params": map[string]any{"discover": true}})
 	a.next(id(7))
@@ -474,8 +529,8 @@ func TestVaultFillsSecretsAgentsNeverSee(t *testing.T) {
 	if code, _, _ := vault.TOTP("JBSWY3DPEHPK3PXP", time.Now()); len(got) != 3 || got[1] != "agent-bot" || (got[2] != code && len(got[2]) != 6) {
 		t.Error("username and the current one-time code:", got)
 	}
-	if len(h.person.prompts) != 1 {
-		t.Error("one sign-in, one Touch ID:", h.person.prompts)
+	if len(h.person.approvals) != 1 {
+		t.Error("one sign-in, one approval:", h.person.approvals)
 	}
 	chrome.mu.Lock()
 	chrome.focused = map[string]any{"tag": "INPUT", "type": "password"}
@@ -520,6 +575,8 @@ func TestVaultFillsSecretsAgentsNeverSee(t *testing.T) {
 func TestPasskeysForThePageItselfAndHandoffs(t *testing.T) {
 	h := newHarness(t)
 	h.s.handoffWait = 300 * time.Millisecond
+	var alerts [][]string
+	h.s.notify = func(args ...string) { alerts = append(alerts, args) }
 	chrome := h.extension("me@example.com")
 	a := h.agent("me@example.com")
 	sid, tab := openTab(a, 1)
@@ -571,7 +628,7 @@ func TestPasskeysForThePageItselfAndHandoffs(t *testing.T) {
 		t.Error("clientData", cd)
 	}
 	saved := h.store.items[len(h.store.items)-1]
-	if saved.Title != "Demo (bot)" || vault.PasskeyOf(saved) == nil || strings.Contains(fmt.Sprint(saved), "private") {
+	if saved.Title != "Demo passkey (bot) · Chrome Relay" || !slices.Contains(saved.Tags, vault.PasskeyTag) || vault.PasskeyOf(saved) == nil || strings.Contains(fmt.Sprint(saved), "private") {
 		t.Error("saved to the vault, no private key:", saved.Title)
 	}
 
@@ -597,6 +654,9 @@ func TestPasskeysForThePageItselfAndHandoffs(t *testing.T) {
 		t.Error("not the relay's: handed to 1Password", r)
 	}
 	chrome.next(func(m map[string]any) bool { return m["op"] == "handoff" && m["rpId"] == "other.example" })
+	if len(alerts) != 1 || alerts[0][0] != "notify" || !strings.Contains(alerts[0][3], "other.example") || alerts[0][5] == "" || alerts[0][6] != fmt.Sprint(tab) {
+		t.Error("the person is told through Chrome Relay.app, with the profile and tab a click opens:", alerts)
+	}
 	ask(map[string]any{"id": 6, "kind": "get", "publicKey": map[string]any{"challenge": b([]byte("x")), "rpId": "webauthn.example"}}, 4)
 	if r := answer(6); r["error"] != "SecurityError" {
 		t.Error("another domain's passkey:", r)
@@ -662,31 +722,39 @@ func (s *memStore) Get(_ context.Context, _, id string) (op.Item, error) {
 func (s *memStore) Create(_ context.Context, p op.ItemCreateParams) (op.Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	it := op.Item{ID: fmt.Sprint("new", len(s.items)), Title: p.Title, Category: p.Category, Fields: p.Fields, Sections: p.Sections, Websites: p.Websites}
+	it := op.Item{ID: fmt.Sprint("new", len(s.items)), Title: p.Title, Category: p.Category, Fields: p.Fields, Sections: p.Sections, Websites: p.Websites, Tags: p.Tags}
 	s.items = append(s.items, it)
 	return it, nil
 }
 func (s *memStore) Put(_ context.Context, it op.Item) (op.Item, error) { return it, nil }
 
 type memPerson struct {
-	mu      sync.Mutex
-	prompts []string
+	mu        sync.Mutex
+	prompts   []string // opening the token, and approvals
+	approvals []string // approvals only (Touch ID here or the iPhone)
+	deny      bool
 }
 
-func (p *memPerson) Unlock(reason string) (string, error) {
+func (p *memPerson) Unlock(key, reason string) (vault.Token, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.prompts = append(p.prompts, reason)
-	return "ops_x", nil
+	return vault.Token{Value: "ops_x", Approve: "sign-in"}, nil
 }
-func (p *memPerson) Approve(reason string) error {
+func (p *memPerson) Approve(d phone.Details) error {
+	reason := d.Reason
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.prompts = append(p.prompts, reason)
+	p.approvals = append(p.approvals, reason)
+	if p.deny {
+		return errors.New("the person denied it on their iPhone")
+	}
 	return nil
 }
 
 type softChip struct {
+	legacy  bool // make keys like Chrome Relay did before: the chip asks for Touch ID itself
 	mu      sync.Mutex
 	keys    []*ecdsa.PrivateKey
 	reasons []string
@@ -699,7 +767,10 @@ func (c *softChip) Create() ([]byte, []byte, error) {
 	defer c.mu.Unlock()
 	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	c.keys = append(c.keys, k)
-	return []byte{byte(len(c.keys) - 1)}, pub(k), nil
+	if c.legacy {
+		return []byte{byte(len(c.keys) - 1)}, pub(k), nil
+	}
+	return []byte(keychainHandle + strconv.Itoa(len(c.keys)-1)), pub(k), nil
 }
 
 // pub: the uncompressed point, as the Secure Enclave gives it
@@ -711,6 +782,10 @@ func (c *softChip) Sign(handle, data []byte, reason, scope string, reuse time.Du
 	c.reasons = append(c.reasons, reason)
 	c.scopes, c.reuses = append(c.scopes, scope), append(c.reuses, reuse)
 	h := sha256.Sum256(data)
+	if ref, ok := bytes.CutPrefix(handle, []byte(keychainHandle)); ok {
+		i, _ := strconv.Atoi(string(ref))
+		return ecdsa.SignASN1(rand.Reader, c.keys[i], h[:])
+	}
 	return ecdsa.SignASN1(rand.Reader, c.keys[handle[0]], h[:])
 }
 
@@ -802,7 +877,7 @@ func TestIdentityWatchersFollowExtensionConnections(t *testing.T) {
 	configWith(c, "three@example.com")
 }
 
-func TestPasskeysCanBeTurnedOffOrShareOneTouchID(t *testing.T) {
+func TestPasskeysCanBeTurnedOff(t *testing.T) {
 	h := newHarness(t)
 	os.WriteFile(filepath.Join(h.home, "config.json"), []byte(`{"extensionIds":["`+extID+`"],"passkeys":{"enabled":false}}`), 0o600)
 	chrome := h.extension("me@example.com")
@@ -820,28 +895,102 @@ func TestPasskeysCanBeTurnedOffOrShareOneTouchID(t *testing.T) {
 		t.Fatal("the popup and password-manager scripts stay:", len(scripts))
 	}
 
-	os.WriteFile(filepath.Join(h.home, "config.json"), []byte(`{"extensionIds":["`+extID+`"],"onepassword":{"vault":"Agents"},"passkeys":{"touchIdReuseSeconds":120}}`), 0o600)
-	h.store.items = append(h.store.items, op.Item{ID: "pk", Title: "Demo", Category: op.ItemCategoryLogin, Websites: []op.Website{{URL: "https://webauthn.example"}},
-		Sections: []op.ItemSection{{ID: "s", Title: vault.PasskeySection}}, Fields: func() []op.ItemField {
-			sec := "s"
-			_, pub, _ := h.chip.Create()
-			f := func(t, v string) op.ItemField { return op.ItemField{Title: t, SectionID: &sec, Value: v} }
-			return []op.ItemField{f("rp id", "webauthn.example"), f("credential id", "Y3JlZA"), f("user name", "bot"),
-				f("public key", base64.RawURLEncoding.EncodeToString(pub)), f("secure enclave key", "AA")}
-		}()})
-	_, tab2 := openTab(a, 2)
-	chrome.event(tab2, "Page.frameNavigated", map[string]any{"frame": map[string]any{"id": "TOP", "url": "https://webauthn.example/login"}})
-	chrome.event(tab2, "Runtime.executionContextCreated", map[string]any{"context": map[string]any{"id": 5, "auxData": map[string]any{"frameId": "TOP", "isDefault": true}}})
-	a.next(func(m map[string]any) bool { return m["method"] == "Runtime.executionContextCreated" })
-	chrome.event(tab2, "Runtime.bindingCalled", map[string]any{"name": binding, "executionContextId": 5,
-		"payload": `{"op":"webauthn","id":1,"kind":"get","mediation":"","publicKey":{"challenge":{"$b":"AAAA"},"rpId":"webauthn.example"}}`})
-	chrome.next(func(m map[string]any) bool { return strings.Contains(expr(m), "__agentBridgeDone(1,") })
-	h.chip.mu.Lock()
-	defer h.chip.mu.Unlock()
-	if len(h.chip.reuses) != 1 || h.chip.reuses[0] != 2*time.Minute || h.chip.scopes[0] == "" {
-		t.Fatal("the reuse window reaches the chip, scoped to this agent:", h.chip.reuses, h.chip.scopes)
+}
+
+// Passkeys Chrome Relay makes are approved by Chrome Relay (Touch ID here or the paired iPhone, via the Person);
+// one approval may cover an agent's sign-ins for the reuse window. Passkeys made before keep the chip's own
+// Touch ID.
+func TestPasskeyApprovalsMacOrIPhone(t *testing.T) {
+	h := newHarness(t)
+	setConfig := func(reuse int) {
+		os.WriteFile(filepath.Join(h.home, "config.json"), []byte(fmt.Sprintf(`{"extensionIds":["`+extID+`"],"onepassword":{"vault":"Agents"},"passkeys":{"touchIdReuseSeconds":%d}}`, reuse)), 0o600)
 	}
-	if !strings.HasSuffix(h.chip.reasons[0], "(and use its other passkeys for the next 2 minutes without asking)") {
-		t.Fatal("the prompt says one approval covers a while:", h.chip.reasons[0])
+	setConfig(120)
+	passkey := func(id, site, user string, legacy bool) {
+		h.chip.legacy = legacy
+		handle, pub, _ := h.chip.Create()
+		sec := "s"
+		f := func(t, v string) op.ItemField { return op.ItemField{Title: t, SectionID: &sec, Value: v} }
+		h.store.items = append(h.store.items, op.Item{ID: id, Title: id, Category: op.ItemCategoryLogin, Websites: []op.Website{{URL: "https://" + site}},
+			Sections: []op.ItemSection{{ID: "s", Title: vault.PasskeySection}}, Fields: []op.ItemField{f("rp id", site),
+				f("credential id", base64.RawURLEncoding.EncodeToString([]byte(id))), f("user name", user),
+				f("public key", base64.RawURLEncoding.EncodeToString(pub)), f("secure enclave key", base64.RawURLEncoding.EncodeToString(handle))}})
+	}
+	passkey("new-a", "a.example", "bot-a", false)
+	passkey("new-b", "b.example", "bot-b", false)
+	passkey("old-c", "c.example", "bot-c", true)
+	chrome := h.extension("me@example.com")
+	a := h.agent("me@example.com")
+	n := 0
+	signIn := func(site string) string {
+		n++
+		_, tab := openTab(a, float64(n))
+		chrome.event(tab, "Page.frameNavigated", map[string]any{"frame": map[string]any{"id": "TOP", "url": "https://" + site + "/login"}})
+		chrome.event(tab, "Runtime.executionContextCreated", map[string]any{"context": map[string]any{"id": 5, "auxData": map[string]any{"frameId": "TOP", "isDefault": true}}})
+		a.next(func(m map[string]any) bool { return m["method"] == "Runtime.executionContextCreated" })
+		chrome.event(tab, "Runtime.bindingCalled", map[string]any{"name": binding, "executionContextId": 5,
+			"payload": `{"op":"webauthn","id":1,"kind":"get","mediation":"","publicKey":{"challenge":{"$b":"AAAA"},"rpId":"` + site + `"}}`})
+		return expr(chrome.next(func(m map[string]any) bool {
+			return m["tabId"] == float64(tab) && strings.Contains(expr(m), "__agentBridgeDone(1,")
+		}))
+	}
+	approvals := func() []string {
+		h.person.mu.Lock()
+		defer h.person.mu.Unlock()
+		return slices.Clone(h.person.approvals)
+	}
+
+	if r := signIn("a.example"); !strings.Contains(r, `"credential"`) {
+		t.Fatal("signed in:", r)
+	}
+	got := approvals()
+	if len(got) != 1 || !strings.Contains(got[0], "sign in to a.example as bot-a") || !strings.HasSuffix(got[0], "(and use its other passkeys for the next 2 minutes without asking)") {
+		t.Fatal("one approval, naming the site and account and the reuse window:", got)
+	}
+	if r := signIn("b.example"); !strings.Contains(r, `"credential"`) || len(approvals()) != 1 {
+		t.Fatal("within the window, the same agent's next passkey needs no approval:", r, approvals())
+	}
+
+	if r := signIn("c.example"); !strings.Contains(r, `"credential"`) || len(approvals()) != 1 {
+		t.Fatal("a passkey made before: the chip's own Touch ID, not Chrome Relay's approval:", r, approvals())
+	}
+
+	setConfig(0)
+	a = h.agent("me@example.com") // a new agent: no window of its own
+	h.person.mu.Lock()
+	h.person.deny = true
+	h.person.mu.Unlock()
+	if r := signIn("a.example"); !strings.Contains(r, "NotAllowedError") || !strings.Contains(r, "denied it on their iPhone") {
+		t.Fatal("denied on the iPhone: the page is refused:", r)
+	}
+	h.person.mu.Lock()
+	h.person.deny = false
+	h.person.mu.Unlock()
+	signIn("a.example")
+	signIn("b.example")
+	if got := approvals(); len(got) != 4 || strings.Contains(got[3], "without asking") {
+		t.Fatal("no reuse window: every sign-in asks:", got)
+	}
+}
+
+// A site rule only reaches profiles where its Google account is signed in: a work rule doesn't send a personal
+// profile's Google hop looking for the work account.
+func TestSiteRulesFollowTheProfilesAccounts(t *testing.T) {
+	for prof, want := range map[string]string{"work@acme.com": "work@acme.com", "me@gmail.com": ""} {
+		h := newHarness(t)
+		os.WriteFile(filepath.Join(h.home, "identities.json"), []byte(`{"profiles":{
+			"work@acme.com":{"googleAccounts":["work@acme.com","me@gmail.com"]},
+			"me@gmail.com":{"googleAccounts":["me@gmail.com"]}},
+			"sites":{"rules":{"myaccount.google.com":"work@acme.com","mail.example":"me@gmail.com"},"learned":{}}}`), 0o600)
+		p := h.extension(prof)
+		cfgs := p.all(func(m map[string]any) bool { return m["op"] == "config" }) // the harness has read it already
+		if len(cfgs) == 0 {
+			t.Fatal(prof, "no config")
+		}
+		sa, _ := cfgs[0]["siteAccounts"].(map[string]any)
+		got, _ := sa["myaccount.google.com"].(string)
+		if got != want || sa["mail.example"] != "me@gmail.com" {
+			t.Errorf("%s: %v", prof, sa)
+		}
 	}
 }

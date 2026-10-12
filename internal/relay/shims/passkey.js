@@ -15,7 +15,8 @@
   const buf = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)).buffer;
   const enc = (v) => v instanceof ArrayBuffer ? { $b: b64(new Uint8Array(v)) } : ArrayBuffer.isView(v) ? { $b: b64(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)) }
     : Array.isArray(v) ? v.map(enc) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, enc(x)])) : v;
-  const own = (o) => Object.fromEntries(Object.entries(o).map(([k, value]) => [k, { value, enumerable: true }]));
+  // writable, like the real ones: pages may assign their own toJSON onto a credential (GitHub does)
+  const own = (o) => Object.fromEntries(Object.entries(o).map(([k, value]) => [k, { value, enumerable: true, writable: true, configurable: true }]));
   const credential = (r, kind) => {
     const x = r.response, made = kind === "create";
     const response = Object.create((made ? AuthenticatorAttestationResponse : AuthenticatorAssertionResponse).prototype, own(made
@@ -39,7 +40,11 @@
     if (r.handoff) {   // not the relay's: the other provider (1Password) asks the person
       const f = delegate[w.kind] && delegate[w.kind]();
       if (typeof f !== "function") { const why = "no passkey for this site in the shared vault, and no 1Password in this browser"; console.warn("Chrome Relay passkeys:", why); return w.reject(new DOMException(why, "NotAllowedError")); }
-      handedOn.add(w.options); return w.resolve(f.call(C, w.options));
+      handedOn.add(w.options);
+      // its prompt is a frame of its own in this page: quiet.js leaves those alone until the person has answered
+      const held = (d) => { for (const win of [window, top]) try { win.__agentBridgeHandoff = Math.max(0, (win.__agentBridgeHandoff || 0) + d); } catch (e) {} };
+      held(1); const p = Promise.resolve().then(() => f.call(C, w.options)); p.then(() => held(-1), () => held(-1));
+      return w.resolve(p);
     }
     if (r.error) { console.warn("Chrome Relay passkeys:", r.message); w.reject(new DOMException(r.message, r.error)); } else w.resolve(credential(r.credential, w.kind));
   } });

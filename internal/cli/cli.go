@@ -28,12 +28,17 @@ const usage = `Chrome Relay: your coding agents drive background tabs in your ev
                                    agent-browser --cdp "$(chrome-relay url you@company.com)" open <url>
   chrome-relay identities          Chrome profiles, their Google accounts, and which account each site uses
   chrome-relay vault               the 1Password vaults agents sign in with: items, websites, what each holds (never values)
-  chrome-relay vault setup         let agents use vaults from your 1Password app: pick accounts, vaults, how often to ask
-                                   (no questions: --account <name or uuid> --vaults "A,B" [...] [--approve session|sign-in|off])
-  chrome-relay vault setup <vault> or one shared vault through a 1Password service account (token locked to this Mac)
+  chrome-relay vault setup         let agents sign in with 1Password: asks which accounts, then creates a shared vault and a
+                                   service account in each (token straight into the Keychain, never shown)
+  chrome-relay vault setup <vault> [--account <email>] one account, no questions (--paste: a token you made yourself)
+  chrome-relay vault approve <m>   how often Chrome Relay asks before agents sign in: session, sign-in or off (asks you first)
   chrome-relay vault forget        stop: remove 1Password from the config, and any service account token from the Keychain
   chrome-relay passkeys [on|off]   passkeys in agent tabs (on by default): Chrome Relay's own live in the Secure Enclave
-  chrome-relay passkeys reuse <s>  let one Touch ID cover an agent's passkey sign-ins for s seconds (max 300; off = every time)
+  chrome-relay passkeys reuse <s>  let one approval cover an agent's passkey sign-ins for s seconds (max 300; off = every time)
+  chrome-relay phone [pair|test]   let a paired iPhone approve agents' requests with Face ID when you're away
+  chrome-relay phone push --key <AuthKey_KEYID.p8> --team-id <TEAMID>  notify it through Apple push with your own
+                                   APNs key, kept in the Keychain (` + "`phone push forget`" + `: back to ntfy)
+  chrome-relay notify [test]       macOS notifications when an agent needs you (a sign-in, a passkey to approve)
   chrome-relay status              connected profiles and agents
   chrome-relay doctor              check everything and say how to fix what's wrong
   chrome-relay update [--force]    after ` + "`git pull` and `./build`" + `: restart the relay and reload the extension everywhere (waits for idle agents unless --force)
@@ -128,6 +133,8 @@ type cli struct {
 	version string
 	out     io.Writer
 	errw    io.Writer
+	op      func(args ...string) (stdout, stderr []byte, err error) // tests: the 1Password CLI
+	opAccts func() []opAccount                                      // tests: its accounts
 }
 
 // Main runs every command but serve; returns the exit code.
@@ -167,6 +174,12 @@ func (c *cli) run() error {
 		return c.vault()
 	case "passkeys":
 		return c.passkeys()
+	case "phone":
+		return c.phone()
+	case "notify":
+		return c.notify()
+	case "attend":
+		return c.attend()
 	case "doctor":
 		return c.doctor()
 	case "update":

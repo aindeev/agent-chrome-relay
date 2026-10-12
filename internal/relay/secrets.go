@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aindeev/agent-chrome-relay/internal/passkeys"
+	"github.com/aindeev/agent-chrome-relay/internal/phone"
 	"github.com/aindeev/agent-chrome-relay/internal/vault"
 )
 
@@ -151,6 +153,7 @@ func (a *Agent) onWebAuthn(t, id int, c map[string]any, from callFrom) {
 	handoff := func(why string) {
 		a.handoffs[t] = handoff{rpID, kind}
 		a.s.extSend(p, map[string]any{"op": "handoff", "tabId": t, "rpId": rpID})
+		a.s.alert(p.prof, t, "Your passkey is needed", fmt.Sprintf("An agent is signing in to %s and needs your passkey from 1Password. Click to open its tab and approve.", rpID))
 		a.s.audit(a, "passkey handoff", "tab", t, "kind", kind, "rpId", rpID, "why", why, "url", a.urls[t])
 		a.s.log("passkey", kind, "for", rpID, "handed to 1Password in tab", t, "-", why)
 		reply(map[string]any{"handoff": true})
@@ -212,7 +215,7 @@ func (a *Agent) onWebAuthn(t, id int, c map[string]any, from callFrom) {
 			handoff("not in the shared vault")
 			return
 		}
-		// the Touch ID prompt reads "chrome-relay is trying to <this>": who is asking, for which site and account
+		// the prompt reads "chrome-relay is trying to <this>" (the iPhone shows it too): who, which site and account
 		as := key.UserName
 		if as == "" {
 			as = key.Item
@@ -222,10 +225,28 @@ func (a *Agent) onWebAuthn(t, id int, c map[string]any, from callFrom) {
 		if reuse > 0 {
 			reason += fmt.Sprintf(" (and use its other passkeys for the next %s without asking)", humanDuration(reuse))
 		}
-		a.s.audit(a, "passkey touch id", "tab", t, "rpId", rpID, "item", key.Item, "url", a.urls[t])
-		a.s.log("passkey: asking for Touch ID to sign in to", rpID, "in tab", t)
 		origin := u.Scheme + "://" + u.Host
 		chip := scoped{a.s.chip, a.sid, reuse}
+		if handle, _ := base64.RawURLEncoding.DecodeString(key.KeyHandle); relayApproved(handle) {
+			// Chrome Relay asks: Touch ID here or Face ID on the paired iPhone, whichever answers first; one approval
+			// may cover this agent's passkey sign-ins for the reuse window
+			if a.passkeysUntil.Before(time.Now()) {
+				a.s.audit(a, "passkey approval", "tab", t, "rpId", rpID, "item", key.Item, "url", a.urls[t])
+				a.s.log("passkey: asking for approval to sign in to", rpID, "in tab", t)
+				a.s.mu.Unlock()
+				err := a.s.vault.Person.Approve(phone.Details{Reason: reason, Agent: describe(a.app, a.cwd), Site: rpID, What: "passkey as " + as})
+				a.s.mu.Lock()
+				if err != nil {
+					refuse("NotAllowedError", err.Error(), "item", key.Item)
+					return
+				}
+				a.passkeysUntil = time.Now().Add(reuse)
+			}
+		} else {
+			// a passkey made before: the chip itself asks for Touch ID on this Mac
+			a.s.audit(a, "passkey touch id", "tab", t, "rpId", rpID, "item", key.Item, "url", a.urls[t])
+			a.s.log("passkey: asking for Touch ID to sign in to", rpID, "in tab", t)
+		}
 		a.s.mu.Unlock()
 		cred, err := passkeys.Authenticate(get, *key, origin, chip, reason)
 		a.s.mu.Lock()

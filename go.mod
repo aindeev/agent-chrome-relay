@@ -6,6 +6,7 @@ require (
 	github.com/1password/onepassword-sdk-go v0.4.1
 	github.com/gorilla/websocket v1.5.3
 	golang.org/x/term v0.39.0
+	rsc.io/qr v0.2.0
 )
 
 require (

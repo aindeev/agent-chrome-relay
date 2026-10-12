@@ -29,5 +29,5 @@ func ServeCmd(args []string, version string) int {
 }
 
 func (in instance) serveOptions(version string) relay.Options {
-	return relay.Options{Home: in.Home, Port: in.Port, Instance: in.vaultInstance(), Version: version}
+	return relay.Options{Home: in.Home, Port: in.Port, Instance: in.vaultInstance(), Version: version, Notifier: in.installedNotifier()}
 }

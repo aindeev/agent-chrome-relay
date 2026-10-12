@@ -15,12 +15,19 @@ private func fail(_ e: Error) -> UnsafeMutablePointer<CChar> {
   let ns = e as NSError, text = "\(e)"
   let cancelled = (e as? LAError).map { [.userCancel, .systemCancel, .appCancel, .authenticationFailed, .userFallback].contains($0.code) } ?? false
     || ns.code == -128 || ns.code == errSecUserCanceled || text.lowercased().contains("cancel")
-  return json(["error": cancelled ? "the person did not approve with Touch ID" : text, "cancelled": cancelled])
+  let declined = (e as? LAError)?.code == .userCancel // they pressed Cancel, as opposed to a timeout or the app stopping it
+  return json(["error": cancelled ? "the person did not approve with Touch ID" : text, "cancelled": cancelled, "declined": declined])
 }
 private func s(_ p: UnsafePointer<CChar>) -> String { String(cString: p) }
 private func b64(_ p: UnsafePointer<CChar>) -> Data { Data(base64Encoded: s(p)) ?? Data() }
 private func touchIDOnly() -> SecAccessControl {
   SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, [.privateKeyUsage, .userPresence], nil)!
+}
+// The chip only: the key works on this Mac and nowhere else, with no prompt, also while the screen is locked
+// (the person is away: that's when the iPhone approves), from the first unlock after a restart. Chrome Relay keeps
+// its handle in its own Keychain item and asks the person itself (Touch ID here, or the paired iPhone) first.
+private func chipOnly() -> SecAccessControl {
+  SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly, .privateKeyUsage, nil)!
 }
 private func context(_ reason: UnsafePointer<CChar>) -> LAContext { let c = LAContext(); c.localizedReason = s(reason); return c }
 
@@ -55,14 +62,35 @@ private func query(_ service: UnsafePointer<CChar>, _ account: UnsafePointer<CCh
   return result.map(fail) ?? ok()
 }
 
-// ---- Lock a secret to this Mac's chip: ECDH with a Secure Enclave key that needs Touch ID, then AES-GCM
-@_cdecl("cr_lock") public func cr_lock(_ secret: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar> {
+// The same, stoppable from another thread with cr_authenticate_stop(tag): when the person approved on their phone
+// instead, the Mac's prompt goes away.
+private let asking = NSLock()
+private var prompts: [String: LAContext] = [:]
+@_cdecl("cr_authenticate_as") public func cr_authenticate_as(_ reason: UnsafePointer<CChar>, _ tag: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar> {
+  let c = LAContext(), key = s(tag); var err: NSError?
+  guard c.canEvaluatePolicy(.deviceOwnerAuthentication, error: &err) else { return fail(err!) }
+  asking.lock(); prompts[key] = c; asking.unlock()
+  defer { asking.lock(); prompts[key] = nil; asking.unlock() }
+  let done = DispatchSemaphore(value: 0); var result: Error?
+  c.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: s(reason)) { success, error in if !success { result = error }; done.signal() }
+  done.wait()
+  return result.map(fail) ?? ok()
+}
+@_cdecl("cr_authenticate_stop") public func cr_authenticate_stop(_ tag: UnsafePointer<CChar>) {
+  asking.lock(); let c = prompts[s(tag)]; asking.unlock()
+  c?.invalidate()
+}
+
+// ---- Lock a secret to this Mac's chip: ECDH with a Secure Enclave key, then AES-GCM. silent: the key needs no
+// Touch ID (the secret then is as safe as the Keychain item holding it); otherwise every Unlock asks.
+@_cdecl("cr_lock") public func cr_lock(_ secret: UnsafePointer<CChar>, _ silent: Bool) -> UnsafeMutablePointer<CChar> {
   do {
-    let chip = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: touchIDOnly())
+    let chip = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: silent ? chipOnly() : touchIDOnly())
     let eph = P256.KeyAgreement.PrivateKey()
     let key = try eph.sharedSecretFromKeyAgreement(with: chip.publicKey).hkdfDerivedSymmetricKey(using: SHA256.self, salt: Data(), sharedInfo: Data("chrome-relay".utf8), outputByteCount: 32)
     let box = try AES.GCM.seal(b64(secret), using: key).combined!
-    let o = ["handle": chip.dataRepresentation.base64EncodedString(), "eph": eph.publicKey.x963Representation.base64EncodedString(), "box": box.base64EncodedString()]
+    var o = ["handle": chip.dataRepresentation.base64EncodedString(), "eph": eph.publicKey.x963Representation.base64EncodedString(), "box": box.base64EncodedString()]
+    if silent { o["silent"] = "1" }
     return ok(String(decoding: try JSONSerialization.data(withJSONObject: o), as: UTF8.self))
   } catch { return fail(error) }
 }
@@ -77,10 +105,11 @@ private func query(_ service: UnsafePointer<CChar>, _ account: UnsafePointer<CCh
   } catch { return fail(error) }
 }
 
-// ---- Passkeys: a signing key made by the chip; every signature needs Touch ID
-@_cdecl("cr_passkey_create") public func cr_passkey_create() -> UnsafeMutablePointer<CChar> {
+// ---- Passkeys: a signing key made by the chip. silent: Chrome Relay approves each use (Mac or iPhone) and the
+// chip asks nothing; otherwise (passkeys made before) every signature needs Touch ID here.
+@_cdecl("cr_passkey_create") public func cr_passkey_create(_ silent: Bool) -> UnsafeMutablePointer<CChar> {
   do {
-    let k = try SecureEnclave.P256.Signing.PrivateKey(accessControl: touchIDOnly())
+    let k = try SecureEnclave.P256.Signing.PrivateKey(accessControl: silent ? chipOnly() : touchIDOnly())
     return ok(["handle": k.dataRepresentation.base64EncodedString(), "publicKey": k.publicKey.x963Representation.base64EncodedString()])
   } catch { return fail(error) }
 }

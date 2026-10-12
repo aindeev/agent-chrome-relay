@@ -5,21 +5,26 @@ package macos
 /*
 #cgo LDFLAGS: -L${SRCDIR} -lsecure -framework Security -framework LocalAuthentication -framework CryptoKit -framework Foundation
 #include <stdlib.h>
+#include <stdbool.h>
 char *cr_keychain_set(const char *, const char *, const char *);
 char *cr_keychain_get(const char *, const char *);
 char *cr_keychain_delete(const char *, const char *);
 char *cr_authenticate(const char *);
-char *cr_lock(const char *);
+char *cr_authenticate_as(const char *, const char *);
+void cr_authenticate_stop(const char *);
+char *cr_lock(const char *, bool);
 char *cr_unlock(const char *, const char *);
-char *cr_passkey_create(void);
+char *cr_passkey_create(bool);
 char *cr_passkey_sign(const char *, const char *, const char *, const char *, int);
 */
 import "C"
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 	"unsafe"
 )
@@ -31,6 +36,7 @@ type answer struct {
 	OK        json.RawMessage `json:"ok"`
 	Error     string          `json:"error"`
 	Cancelled bool            `json:"cancelled"`
+	Declined  bool            `json:"declined"`
 	NotFound  bool            `json:"notFound"`
 }
 
@@ -48,6 +54,8 @@ func call(f func(args ...*C.char) *C.char, args ...string) (json.RawMessage, err
 		return nil, err
 	}
 	switch {
+	case a.Declined:
+		return nil, ErrDeclined
 	case a.Cancelled:
 		return nil, ErrCancelled
 	case a.NotFound:
@@ -95,9 +103,31 @@ func Authenticate(reason string) error {
 	return err
 }
 
-// Lock encrypts secret to a new Secure Enclave key; only Unlock on this Mac, with Touch ID, opens it again.
-func Lock(secret []byte) ([]byte, error) {
-	raw, err := call(func(a ...*C.char) *C.char { return C.cr_lock(a[0]) }, b64(secret))
+// AuthenticateContext is Authenticate that goes away when ctx ends (the person approved somewhere else).
+// ErrDeclined when they pressed Cancel; ErrCancelled when it timed out or was stopped.
+func AuthenticateContext(ctx context.Context, reason string) error {
+	tag := fmt.Sprintf("%p", &reason)
+	done := make(chan error, 1)
+	go func() {
+		_, err := call(func(a ...*C.char) *C.char { return C.cr_authenticate_as(a[0], a[1]) }, reason, tag)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		t := C.CString(tag)
+		C.cr_authenticate_stop(t)
+		C.free(unsafe.Pointer(t))
+		<-done
+		return ctx.Err()
+	}
+}
+
+// Lock encrypts secret to a new Secure Enclave key; only Unlock on this Mac opens it again: with Touch ID, or,
+// silent, without a prompt (then it is as safe as the Keychain item that holds it).
+func Lock(secret []byte, silent bool) ([]byte, error) {
+	raw, err := call(func(a ...*C.char) *C.char { return C.cr_lock(a[0], C.bool(silent)) }, b64(secret))
 	if err != nil {
 		return nil, err
 	}
@@ -115,9 +145,10 @@ func Unlock(locked []byte, reason string) ([]byte, error) {
 }
 
 // PasskeyCreate makes a P-256 signing key in the Secure Enclave: its handle (usable only by this Mac's chip)
-// and its public key (X9.63). Creating asks nothing of the person; every signature does.
-func PasskeyCreate() (handle, publicKey []byte, err error) {
-	raw, err := call(func(...*C.char) *C.char { return C.cr_passkey_create() })
+// and its public key (X9.63). Creating asks nothing of the person. Signing: with Touch ID each time, or, silent,
+// without a prompt (Chrome Relay asks first, and keeps the handle in its own Keychain item).
+func PasskeyCreate(silent bool) (handle, publicKey []byte, err error) {
+	raw, err := call(func(...*C.char) *C.char { return C.cr_passkey_create(C.bool(silent)) })
 	if err != nil {
 		return nil, nil, err
 	}

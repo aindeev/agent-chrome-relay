@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chrome Relay Approve: Transmission and Glass</title>
+<style>
+  :root {
+    --navy: #020a14; --cyan: #5fe3ff; --cyan2: #29b6ff; --ice: #e8fbff; --dim: #6f8aa3; --green: #4dffb5; --red: #ff5f7a;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #01060c; color: var(--ice); font-family: var(--sans); }
+  header, .sec { max-width: 1480px; margin: auto; padding: 56px 48px 0; }
+  h1 { font-size: 34px; letter-spacing: -0.02em; margin: 0 0 8px; }
+  .sec h2 { font-size: 24px; letter-spacing: -0.01em; margin: 0 0 6px; }
+  header p, .sec > p { color: var(--dim); margin: 0; max-width: 820px; line-height: 1.5; }
+  .row { display: flex; flex-wrap: wrap; gap: 40px 28px; justify-content: center; padding: 36px 24px 24px; max-width: 1480px; margin: auto; }
+  .concept { width: 330px; }
+  .concept h3 { font-size: 18px; margin: 16px 0 4px; letter-spacing: -0.01em; }
+  .concept h3 span { color: var(--cyan); }
+  .concept p { color: var(--dim); font-size: 13.5px; line-height: 1.5; margin: 0; }
+  .replay { margin-top: 10px; background: none; border: 1px solid #1d3a55; color: var(--cyan); border-radius: 999px; padding: 6px 14px; font: 500 13px var(--sans); cursor: pointer; }
+
+  .phone { position: relative; width: 330px; height: 714px; border-radius: 54px; background: #000; padding: 12px;
+    box-shadow: 0 0 0 2px #1b2633, 0 0 0 9px #0a0f15, 0 30px 80px rgba(41,182,255,.1); }
+  .screen { position: relative; width: 100%; height: 100%; border-radius: 43px; overflow: hidden; background: var(--navy); user-select: none; }
+  .island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 112px; height: 32px; border-radius: 20px; background: #000; z-index: 20; }
+  .status { position: absolute; top: 17px; left: 30px; right: 30px; display: flex; justify-content: space-between; font: 600 14px var(--sans); z-index: 19; }
+  .home { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 120px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.55); z-index: 19; }
+  .faceid { position: absolute; left: 50%; top: 44%; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 28px; z-index: 30; display: grid; place-items: center;
+    background: rgba(40,44,52,.72); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); animation: fidIn .25s ease-out; }
+  .faceid svg { width: 54px; height: 54px; } .faceid.ok svg path { stroke: #4dffb5; }
+  @keyframes fidIn { from { transform: scale(.85); opacity: 0 } }
+
+  /* ===== TRANSMISSION ===== */
+  .tx { background: #01070e; font-family: var(--mono); }
+  .tx::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(95,227,255,.035) 0 1px, transparent 1px 3px); z-index: 5; }
+  .tx .scan { position: absolute; left: 0; right: 0; height: 140px; background: linear-gradient(180deg, transparent, rgba(95,227,255,.07), transparent); animation: scan 5s linear infinite; }
+  @keyframes scan { from { top: -140px } to { top: 100% } }
+  .tx .head { position: absolute; top: 74px; left: 28px; font: 600 11px var(--mono); letter-spacing: .24em; color: var(--cyan); }
+  .tx .head::before, .txdot::before { content: "● "; color: var(--green); animation: blink 1.2s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0 } }
+  .tx .lines { position: absolute; top: 210px; left: 28px; right: 28px; }
+  .ln { min-height: 30px; font: 400 16px var(--mono); letter-spacing: -0.01em; color: var(--ice); }
+  .ln.k { font-size: 11px; letter-spacing: .2em; color: var(--dim); min-height: 20px; }
+  .ln.hl { color: var(--cyan); text-shadow: 0 0 14px rgba(41,182,255,.6); }
+  .caret { display: inline-block; width: 8px; height: 15px; background: var(--cyan); vertical-align: -3px; animation: blink 1s steps(1) infinite; }
+  .ln.k .caret { width: 6px; height: 11px; vertical-align: -1px; }
+  .tx .fid { position: absolute; bottom: 64px; left: 50%; margin-left: -42px; width: 84px; height: 84px; cursor: pointer; opacity: 0; transition: opacity .3s; }
+  .tx .fid.in { opacity: 1; }
+  .tx .fid svg { width: 100%; height: 100%; }
+  .tx .fidlbl { position: absolute; bottom: 40px; width: 100%; text-align: center; font: 600 10px var(--mono); letter-spacing: .2em; color: var(--dim); opacity: 0; transition: opacity .3s; }
+  .tx .fidlbl.in { opacity: 1; }
+  .tx .sig { position: absolute; top: 330px; left: 28px; right: 28px; font: 600 12px var(--mono); letter-spacing: .14em; color: var(--green); }
+  .tx .deny { position: absolute; bottom: 92px; right: 30px; font: 600 10px var(--mono); letter-spacing: .2em; color: var(--dim); opacity: 0; transition: opacity .3s; cursor: pointer; }
+  .tx .deny.in { opacity: 1; }
+  /* transmission: extras */
+  .txlock { background: radial-gradient(120% 70% at 50% 0%, #07243f, #01070e 60%); }
+  .bigtime { position: absolute; top: 74px; width: 100%; text-align: center; font: 300 78px var(--sans); letter-spacing: -0.03em; }
+  .bigdate { position: absolute; top: 60px; width: 100%; text-align: center; font: 600 16px var(--sans); color: rgba(232,251,255,.8); }
+  .txbanner { position: absolute; left: 12px; right: 12px; top: 300px; padding: 14px 16px; border-radius: 20px; background: rgba(2,12,22,.86); border: 1px solid rgba(95,227,255,.18); font-family: var(--mono); }
+  .txbanner .t { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: .2em; color: var(--cyan); }
+  .txbanner .t span { color: var(--dim); letter-spacing: .1em; }
+  .txbanner .b { margin-top: 10px; font-size: 13px; line-height: 1.5; }
+  .txbanner .b em { font-style: normal; color: var(--cyan); }
+  .txbanner .b small { color: var(--dim); font-size: 11px; letter-spacing: .1em; }
+  .txpanel { position: absolute; left: 10px; right: 10px; top: 120px; border-radius: 24px; background: rgba(1,9,17,.94); border: 1px solid rgba(95,227,255,.18); font-family: var(--mono); padding: 18px 20px 20px; overflow: hidden; }
+  .txpanel::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(95,227,255,.035) 0 1px, transparent 1px 3px); }
+  .txpanel .top { font: 600 10px var(--mono); letter-spacing: .2em; color: var(--cyan); display: flex; justify-content: space-between; }
+  .txpanel .top span:last-child { color: var(--dim); }
+  .txpanel .lines { margin-top: 26px; min-height: 96px; }
+  .txpanel .act { margin-top: 18px; display: flex; align-items: center; justify-content: space-between; }
+  .txpanel .act .no { font: 600 10px var(--mono); letter-spacing: .2em; color: var(--dim); cursor: pointer; }
+  .txpanel .act .go { display: flex; align-items: center; gap: 10px; font: 600 10px var(--mono); letter-spacing: .2em; color: var(--cyan); cursor: pointer; }
+  .txpanel .act .go i { width: 46px; height: 46px; border-radius: 50%; border: 1.5px solid rgba(95,227,255,.6); display: grid; place-items: center; box-shadow: 0 0 14px rgba(41,182,255,.35); }
+  .txpanel .sig { margin-top: 16px; font: 600 11px var(--mono); letter-spacing: .14em; color: var(--green); min-height: 16px; }
+  .dim-bg { position: absolute; inset: 0; background: rgba(0,0,0,.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .txisland { position: absolute; top: 11px; left: 12px; right: 12px; height: 84px; border-radius: 40px; background: #000; z-index: 21; display: flex; align-items: center; gap: 12px; padding: 0 22px; font-family: var(--mono); }
+  .txisland .l { flex: 1; }
+  .txisland .l div:first-child { font: 600 10px var(--mono); letter-spacing: .2em; color: var(--cyan); }
+  .txisland .l div:last-child { font: 400 14px var(--mono); margin-top: 6px; }
+  .txisland .cd { font: 600 13px var(--mono); color: var(--dim); }
+  .apps { position: absolute; top: 140px; left: 26px; right: 26px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px 18px; }
+  .apps i { display: block; aspect-ratio: 1; border-radius: 15px; background: rgba(255,255,255,.07); }
+  .txlog { position: absolute; top: 70px; left: 24px; right: 20px; font-family: var(--mono); }
+  .txlog .h { font: 600 11px var(--mono); letter-spacing: .24em; color: var(--cyan); margin-bottom: 22px; }
+  .txlog .e { display: grid; grid-template-columns: 44px 14px 1fr; gap: 6px; font-size: 12px; line-height: 1.45; padding: 9px 0; border-bottom: 1px dashed rgba(95,227,255,.12); }
+  .txlog .e .tm { color: var(--dim); } .txlog .e .ok { color: var(--green); } .txlog .e .no { color: var(--red); }
+  .txlog .e small { display: block; color: var(--dim); font-size: 10px; letter-spacing: .1em; }
+
+  /* ===== GLASS (shimmer) ===== */
+  .sh { background: #030510; }
+  .aurora { position: absolute; inset: -40%; filter: blur(60px) saturate(1.4); opacity: .85; }
+  .aurora i { position: absolute; width: 60%; height: 60%; border-radius: 50%; mix-blend-mode: screen; animation: roam 14s ease-in-out infinite alternate; }
+  .aurora i:nth-child(1) { left: 10%; top: 15%; background: radial-gradient(circle, #29b6ff, transparent 65%); }
+  .aurora i:nth-child(2) { left: 40%; top: 35%; background: radial-gradient(circle, #8a5cff, transparent 65%); animation-duration: 17s; animation-delay: -5s; }
+  .aurora i:nth-child(3) { left: 20%; top: 50%; background: radial-gradient(circle, #36ffd2, transparent 65%); animation-duration: 20s; animation-delay: -9s; opacity: .7; }
+  .aurora i:nth-child(4) { left: 45%; top: 5%; background: radial-gradient(circle, #ff6fd8, transparent 65%); animation-duration: 23s; animation-delay: -3s; opacity: .45; }
+  .aurora.soft { opacity: .45; }
+  @keyframes roam { 0% { transform: translate(0,0) scale(1) } 50% { transform: translate(18%, -12%) scale(1.25) } 100% { transform: translate(-14%, 16%) scale(.9) } }
+  .grain { position: absolute; inset: 0; opacity: .14; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+  .glass { background: linear-gradient(150deg, rgba(255,255,255,.16), rgba(255,255,255,.04) 45%, rgba(255,255,255,.07));
+    backdrop-filter: blur(22px) saturate(1.6); -webkit-backdrop-filter: blur(22px) saturate(1.6);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.45), inset 0 -1px 0 rgba(255,255,255,.08), inset 1px 0 0 rgba(255,255,255,.12), 0 20px 50px rgba(0,0,0,.25); }
+  .site { font: 600 17px var(--sans); letter-spacing: -0.01em;
+    background: linear-gradient(90deg, #ffffff, #bfefff, #e2d0ff, #ffd9f2, #ffffff); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shine 5s linear infinite; }
+  @keyframes shine { to { background-position: 300% 0 } }
+  .who { margin-top: 4px; font: 500 12px var(--sans); color: rgba(232,251,255,.6); }
+  .glyph { filter: drop-shadow(0 0 8px rgba(255,255,255,.6)) drop-shadow(0 0 18px rgba(185,140,255,.6)); }
+  .gl .idle { position: absolute; top: 320px; width: 100%; text-align: center; font: 500 12px var(--sans); letter-spacing: .3em; color: rgba(232,251,255,.3); transition: opacity .6s; text-transform: uppercase; }
+  .gl .card { position: absolute; left: 22px; right: 22px; bottom: 54px; padding: 20px 20px 16px; border-radius: 30px; opacity: 0; transform: translateY(24px); transition: all .9s cubic-bezier(.2,.9,.2,1.05); }
+  .gl .card.in { opacity: 1; transform: none; }
+  .gl .row1, .glrow { display: flex; align-items: center; gap: 12px; }
+  .gl .row1 svg, .glrow svg { width: 26px; height: 26px; flex: none; }
+  .pill { position: relative; margin-top: 18px; height: 50px; border-radius: 25px; overflow: hidden; cursor: pointer; display: grid; place-items: center;
+    background: rgba(255,255,255,.1); box-shadow: inset 0 1px 0 rgba(255,255,255,.3); font: 600 15px var(--sans); color: rgba(255,255,255,.95); }
+  .pill .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; transition: width .35s; background: linear-gradient(90deg, rgba(95,227,255,.55), rgba(185,140,255,.55), rgba(255,255,255,.75)); }
+  .pill span { position: relative; }
+  .gdeny { margin-top: 10px; text-align: center; font: 500 12px var(--sans); color: rgba(255,255,255,.5); cursor: pointer; }
+  .gl .charge { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(circle at 50% 85%, rgba(255,255,255,.9), rgba(185,140,255,.4) 30%, transparent 60%); }
+  .gl .done { position: absolute; top: 320px; width: 100%; text-align: center; opacity: 0; transition: opacity .5s; }
+  /* glass: extras */
+  .glbanner { position: absolute; left: 12px; right: 12px; top: 300px; padding: 14px 16px; border-radius: 24px; }
+  .glbanner .t { display: flex; align-items: center; gap: 8px; font: 600 12px var(--sans); color: rgba(255,255,255,.8); }
+  .glbanner .t span { margin-left: auto; font-weight: 500; color: rgba(255,255,255,.5); }
+  .glbanner .b { margin-top: 8px; font: 500 14px/1.35 var(--sans); }
+  .appmini { width: 22px; height: 22px; border-radius: 6px; overflow: hidden; position: relative; flex: none; background: #06081a; }
+  .glpanel { position: absolute; left: 12px; right: 12px; top: 130px; padding: 22px 20px 16px; border-radius: 30px; }
+  .glpanel .t { font: 600 12px var(--sans); color: rgba(255,255,255,.6); margin-bottom: 18px; display: flex; justify-content: space-between; }
+  .glisland { position: absolute; top: 11px; left: 12px; right: 12px; height: 84px; border-radius: 40px; background: #000; z-index: 21; display: flex; align-items: center; gap: 12px; padding: 0 22px; }
+  .glisland .l { flex: 1; } .glisland .who { margin-top: 2px; }
+  .glisland .ring { width: 36px; height: 36px; }
+  .glhist { position: absolute; top: 64px; left: 18px; right: 18px; }
+  .glhist .h { font: 700 28px var(--sans); letter-spacing: -0.02em; margin: 0 4px 16px; }
+  .glhist .e { border-radius: 20px; padding: 12px 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; }
+  .glhist .e .s { font: 600 14px var(--sans); }
+  .glhist .e .w { font: 500 11px var(--sans); color: rgba(255,255,255,.55); margin-top: 2px; }
+  .glhist .e .st { margin-left: auto; font: 600 12px var(--sans); }
+  .glhist .e .st.ok { color: #9ff5d9; } .glhist .e .st.no { color: #ffb3c2; }
+
+  /* ===== ICONS ===== */
+  .icons { display: flex; flex-wrap: wrap; gap: 48px; justify-content: center; padding: 36px 24px 24px; }
+  .icon { width: 200px; text-align: center; }
+  .icon .tile { width: 180px; height: 180px; margin: auto; border-radius: 40px; overflow: hidden; position: relative; box-shadow: 0 20px 50px rgba(0,0,0,.4); }
+  .icon h3 { font-size: 16px; margin: 16px 0 4px; } .icon p { color: var(--dim); font-size: 13px; line-height: 1.45; margin: 0; }
+  .tile .aurora { inset: -30%; filter: blur(22px) saturate(1.5); opacity: 1; }
+  .tile svg.c { position: absolute; }
+  .homes { display: flex; justify-content: center; padding: 10px 0 70px; }
+  .homes .scr { width: 360px; height: 140px; border-radius: 30px; position: relative; overflow: hidden; background: linear-gradient(160deg, #233a5c, #0f1c2e); display: flex; align-items: center; justify-content: space-around; padding: 0 14px; }
+  .homes .mini { width: 60px; text-align: center; font: 500 11px var(--sans); color: #fff; }
+  .homes .mini .tile { width: 60px; height: 60px; border-radius: 13.4px; position: relative; overflow: hidden; margin-bottom: 5px; }
+  .homes .mini .tile.gray { background: rgba(255,255,255,.15); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Chrome Relay Approve: Transmission and Glass</h1>
+  <p>The two directions left, each carried through every screen. Tap to approve; Face ID is the deliberate step. Below them, icon ideas to go with Glass.</p>
+</header>
+
+<div class="row">
+  <div class="concept">
+    <div class="phone"><div class="screen tx" id="tx">
+      <div class="island"></div><div class="status"><span>9:41</span><span>●●● ▮</span></div>
+      <div class="scan"></div><div class="head">INCOMING</div>
+      <div class="lines" id="txf"></div><div class="sig" id="txsig"></div>
+      <div class="deny" id="txno">DENY</div>
+      <div class="fid" id="txfid"><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="38" fill="rgba(95,227,255,.05)" stroke="rgba(95,227,255,.35)" stroke-width="2"/>
+        <g transform="translate(25 25)" fill="none" stroke="#5fe3ff" stroke-width="2" stroke-linecap="round"><path d="M2 9V6a4 4 0 0 1 4-4h3M25 2h3a4 4 0 0 1 4 4v3M32 25v3a4 4 0 0 1-4 4h-3M9 32H6a4 4 0 0 1-4-4v-3M11 12v2M23 12v2M17 12v8h-2M12 24c3 2 7 2 10 0"/></g></svg></div>
+      <div class="fidlbl" id="txl">TAP TO SIGN</div>
+      <div class="home"></div>
+    </div></div>
+    <h3><span>Transmission</span></h3>
+    <p>Three lines type in fast, then one glyph to tap. Approved: "✓ SIGNED" types out. DENY: "✕ DENIED".</p>
+    <button class="replay" onclick="tx()">Replay</button>
+  </div>
+
+  <div class="concept">
+    <div class="phone"><div class="screen sh gl" id="gl">
+      <div class="aurora"><i></i><i></i><i></i><i></i></div><div class="grain"></div>
+      <div class="island"></div><div class="status"><span>9:41</span><span>●●● ▮</span></div>
+      <div class="idle" id="glidle">listening</div>
+      <div class="done" id="gldone"><div class="site">Approved</div></div>
+      <div class="card glass" id="glc">
+        <div class="row1"><svg class="glyph" viewBox="0 0 24 24"><path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="#fff"/></svg><div><div class="site">twilio.com</div><div class="who">Claude Code · sign in</div></div></div>
+        <div class="pill" id="glp"><div class="fill" id="glf"></div><span>Approve</span></div>
+        <div class="gdeny">Deny</div>
+      </div>
+      <div class="charge" id="glch"></div>
+      <div class="home"></div>
+    </div></div>
+    <h3><span>Glass</span></h3>
+    <p>A drifting aurora, and a clear glass card low where your thumb is. Approved: the light flashes and settles.</p>
+    <button class="replay" onclick="gl()">Replay</button>
+  </div>
+</div>
+
+<!-- ============ TRANSMISSION, EVERYWHERE ============ -->
+<div class="sec"><h2>Transmission, everywhere</h2><p>The push, approving inside the notification, the Dynamic Island while a request waits, and the history: all terminal, all typed.</p></div>
+<div class="row">
+  <div class="concept"><div class="phone"><div class="screen txlock">
+    <div class="island"></div><div class="bigdate">Saturday, October 11</div><div class="bigtime">9:41</div>
+    <div class="txbanner"><div class="t"><span class="txdot" style="color:var(--cyan);letter-spacing:.2em">RELAY</span><span>now</span></div>
+      <div class="b">CLAUDE CODE → <em>twilio.com</em><br><small>PASSWORD + CODE · LONG-PRESS TO SIGN</small></div></div>
+    <div class="home"></div></div></div>
+    <h3>The push</h3><p>Mono, one line of who and where, and a hint that a long-press signs it right there.</p></div>
+
+  <div class="concept"><div class="phone"><div class="screen txlock" id="txn">
+    <div class="bigdate">Saturday, October 11</div><div class="bigtime">9:41</div><div class="dim-bg"></div>
+    <div class="txpanel"><div class="top"><span class="txdot">INCOMING</span><span>MACBOOK PRO</span></div>
+      <div class="lines" id="txnf"></div>
+      <div class="act"><span class="no">DENY</span><span class="go" id="txngo">TAP TO SIGN <i><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#5fe3ff" stroke-width="1.6" stroke-linecap="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M9 9.5v1M15 9.5v1M12 9.5v4h-1M9.5 16c1.5 1 3.5 1 5 0"/></svg></i></span></div>
+      <div class="sig" id="txnsig"></div></div>
+    <div class="home"></div></div></div>
+    <h3>Approve in the notification</h3><p>Long-press the push: the transmission opens in place and types in. Tap, Face ID, signed; the app never opens.</p></div>
+
+  <div class="concept"><div class="phone"><div class="screen tx">
+    <div class="txisland"><div class="l"><div class="txdot">INCOMING</div><div>twilio.com<span class="caret" style="height:12px;width:6px;margin-left:3px"></span></div></div><div class="cd" id="txcd">1:58</div></div>
+    <div class="apps"><i></i><i></i><i style="background:url('../Approve/Assets.xcassets/AppIcon.appiconset/icon-1024.png') center/cover"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="home"></div></div></div>
+    <h3>Dynamic Island</h3><p>While a request waits: INCOMING, the site with a blinking caret, and the seconds left. Tap to open it.</p></div>
+
+  <div class="concept"><div class="phone"><div class="screen tx">
+    <div class="island"></div><div class="status"><span>9:41</span><span>●●● ▮</span></div>
+    <div class="txlog"><div class="h">LOG</div>
+      <div class="e"><span class="tm">09:38</span><span class="ok">✓</span><span>CLAUDE CODE twilio.com<small>PASSWORD + CODE · FACE ID</small></span></div>
+      <div class="e"><span class="tm">09:12</span><span class="ok">✓</span><span>CODEX aws.amazon.com<small>CODE · TOUCH ID ON MAC</small></span></div>
+      <div class="e"><span class="tm">08:57</span><span class="no">✕</span><span>CURSOR github.com<small>DENIED ON IPHONE</small></span></div>
+      <div class="e"><span class="tm">08:40</span><span class="ok">✓</span><span>CLAUDE CODE google.com<small>PASSKEY · FACE ID · 2 MIN</small></span></div>
+      <div class="e"><span class="tm">YDAY</span><span class="ok">◆</span><span>PAIRED MACBOOK PRO<small>TOUCH ID + QR</small></span></div>
+    </div>
+    <div class="home"></div></div></div>
+    <h3>History</h3><p>A log, like <code>chrome-relay audit</code>: time, ✓ or ✕, agent and site, and how it was approved.</p></div>
+</div>
+
+<!-- ============ GLASS, EVERYWHERE ============ -->
+<div class="sec"><h2>Glass, everywhere</h2><p>The same four, in light: aurora behind, clear glass in front, the site name shimmering.</p></div>
+<div class="row">
+  <div class="concept"><div class="phone"><div class="screen sh">
+    <div class="aurora soft"><i></i><i></i><i></i><i></i></div><div class="grain"></div>
+    <div class="island"></div><div class="bigdate">Saturday, October 11</div><div class="bigtime">9:41</div>
+    <div class="glbanner glass"><div class="t"><div class="appmini"><div class="aurora" style="inset:-30%;filter:blur(4px)"><i></i><i></i><i></i></div></div>Relay Approve<span>now</span></div>
+      <div class="b">Claude Code wants to sign in to twilio.com</div></div>
+    <div class="home"></div></div></div>
+    <h3>The push</h3><p>A glass banner over the aurora. One plain sentence.</p></div>
+
+  <div class="concept"><div class="phone"><div class="screen sh" id="gn">
+    <div class="aurora soft"><i></i><i></i><i></i><i></i></div><div class="grain"></div>
+    <div class="glpanel glass"><div class="t"><span>Relay Approve</span><span>MacBook Pro</span></div>
+      <div class="glrow"><svg class="glyph" viewBox="0 0 24 24"><path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="#fff"/></svg><div><div class="site">twilio.com</div><div class="who">Claude Code · password and code</div></div></div>
+      <div class="pill" id="gnpill"><div class="fill" id="gnfill"></div><span id="gnlbl">Approve</span></div><div class="gdeny">Deny</div></div>
+    <div class="home"></div></div></div>
+    <h3>Approve in the notification</h3><p>Long-press: the glass card opens in place. Approve, Face ID, the pill fills with light, done.</p></div>
+
+  <div class="concept"><div class="phone"><div class="screen sh">
+    <div class="aurora soft"><i></i><i></i><i></i><i></i></div><div class="grain"></div>
+    <div class="glisland"><svg class="glyph" width="20" height="20" viewBox="0 0 24 24"><path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="#fff"/></svg>
+      <div class="l"><div class="site" style="font-size:14px">twilio.com</div><div class="who">Claude Code is waiting</div></div>
+      <svg class="ring" viewBox="0 0 36 36"><defs><linearGradient id="rg"><stop offset="0" stop-color="#5fe3ff"/><stop offset=".5" stop-color="#b98cff"/><stop offset="1" stop-color="#ff8fe0"/></linearGradient></defs>
+        <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="3"/><circle cx="18" cy="18" r="15" fill="none" stroke="url(#rg)" stroke-width="3" stroke-linecap="round" stroke-dasharray="94" stroke-dashoffset="30" transform="rotate(-90 18 18)"/></svg></div>
+    <div class="apps"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="home"></div></div></div>
+    <h3>Dynamic Island</h3><p>A glowing cursor, the site shimmering, and an iridescent countdown ring.</p></div>
+
+  <div class="concept"><div class="phone"><div class="screen sh">
+    <div class="aurora soft"><i></i><i></i><i></i><i></i></div><div class="grain"></div>
+    <div class="island"></div><div class="status"><span>9:41</span><span>●●● ▮</span></div>
+    <div class="glhist"><div class="h">History</div>
+      <div class="e glass"><div><div class="s">twilio.com</div><div class="w">Claude Code · 9:38 · Face ID</div></div><div class="st ok">Approved</div></div>
+      <div class="e glass"><div><div class="s">aws.amazon.com</div><div class="w">Codex · 9:12 · Touch ID on Mac</div></div><div class="st ok">Approved</div></div>
+      <div class="e glass"><div><div class="s">github.com</div><div class="w">Cursor · 8:57</div></div><div class="st no">Denied</div></div>
+      <div class="e glass"><div><div class="s">google.com</div><div class="w">Claude Code · 8:40 · passkey</div></div><div class="st ok">Approved</div></div>
+    </div>
+    <div class="home"></div></div></div>
+    <h3>History</h3><p>Glass rows over a calmer aurora: site first, then who, when and how.</p></div>
+</div>
+
+<!-- ============ ICONS ============ -->
+<div class="sec"><h2>Icon ideas for Glass</h2><p>Today's icon is the cyan cursor on navy. These keep the cursor and bring in the aurora.</p></div>
+<div class="icons">
+  <div class="icon"><div class="tile"><img src="../Approve/Assets.xcassets/AppIcon.appiconset/icon-1024.png" style="width:100%;height:100%"></div>
+    <h3>Today</h3><p>Cyan cursor, navy. Matches the Chrome extension.</p></div>
+  <div class="icon"><div class="tile" style="background:#06081a"><div class="aurora"><i></i><i></i><i></i><i></i></div>
+    <svg class="c" viewBox="0 0 24 24" style="left:30px;top:42px;width:70px;opacity:.22"><path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="#fff"/></svg>
+    <svg class="c" viewBox="0 0 24 24" style="left:46px;top:30px;width:80px;opacity:.4"><path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="#fff"/></svg>
+    <svg class="c glyph" viewBox="0 0 24 24" style="left:62px;top:20px;width:92px"><path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="#fff"/></svg></div>
+    <h3>A · Aurora cursor</h3><p>Today's composition, made of light: white cursor and ghosts on the aurora.</p></div>
+  <div class="icon"><div class="tile" style="background:#05070f"><div class="aurora" style="opacity:.75"><i></i><i></i><i></i><i></i></div>
+    <svg class="c" viewBox="0 0 24 24" style="left:44px;top:34px;width:96px;filter:drop-shadow(0 6px 18px rgba(0,0,0,.35))"><defs><linearGradient id="ig" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.95)"/><stop offset=".6" stop-color="rgba(255,255,255,.35)"/><stop offset="1" stop-color="rgba(255,255,255,.6)"/></linearGradient></defs>
+      <path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="url(#ig)" stroke="rgba(255,255,255,.9)" stroke-width=".5"/></svg></div>
+    <h3>B · Glass cursor</h3><p>One frosted-glass cursor with a bright edge, the aurora seen through it. No ghosts.</p></div>
+  <div class="icon"><div class="tile" style="background:#05070f"><div class="aurora"><i></i><i></i><i></i><i></i></div>
+    <svg class="c" viewBox="0 0 180 180" style="inset:0"><circle cx="90" cy="90" r="56" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="3" style="filter:drop-shadow(0 0 8px #fff) drop-shadow(0 0 18px #b98cff)"/></svg>
+    <svg class="c glyph" viewBox="0 0 24 24" style="left:70px;top:66px;width:48px"><path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="#fff"/></svg></div>
+    <h3>C · Halo</h3><p>A ring of light around a small cursor: reads as "approve" even at small sizes.</p></div>
+</div>
+<div class="homes">
+  <div class="scr">
+    <div class="mini"><div class="tile gray"></div>Photos</div>
+    <div class="mini"><div class="tile" style="background:#06081a"><div class="aurora" style="inset:-30%;filter:blur(8px)"><i></i><i></i><i></i><i></i></div>
+      <svg viewBox="0 0 24 24" style="position:absolute;left:12px;top:15px;width:28px;opacity:.35"><path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="#fff"/></svg>
+      <svg viewBox="0 0 24 24" style="position:absolute;left:18px;top:10px;width:32px" class="glyph"><path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="#fff"/></svg></div>A</div>
+    <div class="mini"><div class="tile" style="background:#05070f"><div class="aurora" style="inset:-30%;filter:blur(8px);opacity:.75"><i></i><i></i><i></i><i></i></div>
+      <svg viewBox="0 0 24 24" style="position:absolute;left:15px;top:11px;width:34px"><path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="rgba(255,255,255,.75)" stroke="#fff" stroke-width=".6"/></svg></div>B</div>
+    <div class="mini"><div class="tile" style="background:#05070f"><div class="aurora" style="inset:-30%;filter:blur(8px)"><i></i><i></i><i></i><i></i></div>
+      <svg viewBox="0 0 60 60" style="position:absolute;inset:0"><circle cx="30" cy="30" r="18" fill="none" stroke="#fff" stroke-width="1.6"/></svg>
+      <svg viewBox="0 0 24 24" style="position:absolute;left:23px;top:22px;width:16px"><path d="M4 2 L4 19 L8.5 14.5 L11.5 21.5 L14.5 20 L11.5 13.5 L18 13.5 Z" fill="#fff"/></svg></div>C</div>
+    <div class="mini"><div class="tile gray"></div>Mail</div>
+  </div>
+</div>
+
+<script>
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const $ = id => document.getElementById(id);
+function faceID(screen) {
+  return new Promise(r => {
+    const d = document.createElement("div"); d.className = "faceid";
+    d.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M9 9.5v1M15 9.5v1M12 9.5v4h-1M9.5 16c1.5 1 3.5 1 5 0"/></svg>';
+    screen.appendChild(d);
+    setTimeout(() => { d.classList.add("ok"); d.querySelector("svg").innerHTML = '<path d="M7 12.5l3.2 3.2L17 9" />'; }, 650);
+    setTimeout(() => { d.remove(); r(); }, 1050);
+  });
+}
+// tap: Face ID, then onDone; auto() is the demo's own tap
+function tapper(el, onDone) {
+  let done = false; const screen = el.closest(".screen");
+  const go = async () => { if (done) return; done = true; navigator.vibrate?.(20); await faceID(screen); onDone(); };
+  el.onclick = go; return { auto: go };
+}
+async function typeLines(box, lines, run, cur) {
+  box.innerHTML = "";
+  for (const [k, v, hl] of lines) {
+    const row = document.createElement("div"); row.className = `ln ${k} ${hl || ""}`; box.appendChild(row);
+    for (let i = 0; i <= v.length; i++) { if (run !== cur()) return false; row.innerHTML = v.slice(0, i) + '<span class="caret"></span>'; await sleep(14); }
+    row.textContent = v; await sleep(70);
+  }
+  return true;
+}
+async function typeText(el, text, run, cur) { for (let i = 0; i <= text.length; i++) { if (run !== cur()) return; el.textContent = text.slice(0, i); await sleep(20); } }
+const REQ = [["k", "CLAUDE CODE"], ["", "twilio.com", "hl"], ["", "password + code"]];
+
+// Transmission
+let xRun = 0;
+async function tx() {
+  const run = ++xRun, cur = () => xRun, ui = ["txfid", "txl", "txno"];
+  $("txsig").textContent = ""; $("txsig").style.color = ""; ui.forEach(i => $(i).classList.remove("in"));
+  await sleep(350);
+  if (!await typeLines($("txf"), REQ, run, cur)) return;
+  ui.forEach(i => $(i).classList.add("in"));
+  const t = tapper($("txfid"), async () => { ui.forEach(i => $(i).classList.remove("in")); await typeText($("txsig"), "✓ SIGNED · SENT TO MACBOOK PRO", run, cur); await sleep(2600); if (run === xRun) tx(); });
+  $("txno").onclick = async () => { const r = ++xRun; ui.forEach(i => $(i).classList.remove("in")); $("txsig").style.color = "var(--red)"; await typeText($("txsig"), "✕ DENIED", r, cur); await sleep(2000); if (r === xRun) tx(); };
+  await sleep(2400); if (run === xRun) t.auto();
+}
+// Glass
+let gRun = 0;
+async function gl() {
+  const run = ++gRun;
+  $("glc").classList.remove("in"); $("glidle").style.opacity = 1; $("gldone").style.opacity = 0; $("glf").style.width = "0%";
+  await sleep(2000); if (run !== gRun) return;
+  $("glidle").style.opacity = 0; $("glc").classList.add("in");
+  const t = tapper($("glp"), async () => { $("glf").style.width = "100%"; await sleep(380);
+    $("glch").animate([{ opacity: 0 }, { opacity: .9 }, { opacity: 0 }], { duration: 1000 }); $("glc").classList.remove("in"); $("gldone").style.opacity = 1;
+    await sleep(2600); if (run === gRun) gl(); });
+  await sleep(2600); if (run === gRun) t.auto();
+}
+// Transmission: in the notification
+let nRun = 0;
+async function txn() {
+  const run = ++nRun, cur = () => nRun; $("txnsig").textContent = "";
+  await sleep(500); if (!await typeLines($("txnf"), REQ, run, cur)) return;
+  const t = tapper($("txngo"), async () => { await typeText($("txnsig"), "✓ SIGNED", run, cur); await sleep(2600); if (run === nRun) txn(); });
+  await sleep(2600); if (run === nRun) t.auto();
+}
+// Glass: in the notification
+let mRun = 0;
+async function gn() {
+  const run = ++mRun; $("gnfill").style.width = "0%"; $("gnlbl").textContent = "Approve";
+  await sleep(2600); if (run !== mRun) return;
+  const t = tapper($("gnpill"), async () => { $("gnfill").style.width = "100%"; await sleep(380); $("gnlbl").textContent = "Approved"; await sleep(2600); if (run === mRun) gn(); });
+  t.auto();
+}
+let s = 118; setInterval(() => { s = s > 1 ? s - 1 : 118; $("txcd").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }, 1000);
+tx(); gl(); txn(); gn();
+</script>
+</body>
+</html>

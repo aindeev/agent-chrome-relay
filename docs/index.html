@@ -59,10 +59,10 @@
     <div class="sea" aria-hidden="true">
       <div class="sea-lines"></div>
       <div class="sea-lines sea-lines--b"></div>
-      <span class="drifter d1"><i></i><i></i><i></i></span>
-      <span class="drifter d2"><i></i><i></i><i></i></span>
-      <span class="drifter d3"><i></i><i></i><i></i></span>
-      <span class="drifter d4"><i></i><i></i><i></i></span>
+      <span class="drifter d1"><i></i><i></i></span>
+      <span class="drifter d2"><i></i><i></i></span>
+      <span class="drifter d3"><i></i><i></i></span>
+      <span class="drifter d4"><i></i><i></i></span>
     </div>
 
     <div class="hero-inner">
@@ -123,7 +123,7 @@
     <div class="stage reveal" id="stage">
       <div class="term term--hero">
         <div class="term-bar">
-          <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lights" aria-hidden="true"><i></i><i></i></span>
           <span class="term-title">what your agent runs</span>
         </div>
         <pre class="term-body" id="demoTerm" aria-live="off"><span class="p">$</span> agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com
@@ -141,7 +141,7 @@
 
       <div class="chrome" aria-hidden="true">
         <div class="chrome-tabs">
-          <span class="lights"><i></i><i></i><i></i></span>
+          <span class="lights"><i></i><i></i></span>
           <span class="tgroup" id="agentsGroup"><i></i>Agents<b id="agentsCount">1</b></span>
           <span class="ctab">Inbox</span>
           <span class="ctab ctab--active">Q4 plan · Docs</span>
@@ -170,7 +170,7 @@
             <div class="gp-nav"><span class="gp-search" data-ref="e1"></span><span class="gp-link" data-ref="e3"></span></div>
             <div class="gp-rows"><i></i><i></i><i></i></div>
             <span class="gp-btn" data-ref="e5">New report</span>
-            <span class="gp-pointer"><i></i><i></i><i></i></span>
+            <span class="gp-pointer"><i></i><i></i></span>
             <span class="gp-ripple"></span>
           </div>
           <div class="ghost-foot">only this agent sees it</div>
@@ -341,7 +341,7 @@
 
     <div class="term term--audit reveal">
       <div class="term-bar">
-        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="lights" aria-hidden="true"><i></i><i></i></span>
         <span class="term-title">chrome-relay audit</span>
         <span class="swipe" aria-hidden="true">scroll →</span>
       </div>
@@ -387,8 +387,8 @@ Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
 
 1. Check the basics: macOS, Google Chrome, git and Go 1.25+. If agent-browser is missing, install it with `npm i -g agent-browser`. Also check whether Xcode&#x27;s command line tools are installed (`xcode-select -p`): they&#x27;re optional, and only needed for signing in with 1Password and for Chrome Relay&#x27;s own passkeys. If they&#x27;re missing, tell me that and ask whether I want them. Ask me before installing anything else.
 2. Clone the repo to ~/agent-chrome-relay (if it&#x27;s already there, `git pull` instead). In the clone, run `./build`: it compiles Chrome Relay and signs it on this Mac (with my code-signing identity if I have one, otherwise ad-hoc). If it lists several identities, show me the list and ask which one to use, then run `./build --identity &quot;&lt;that name&gt;&quot;`. Tell me what its last lines say it built. Then run `./chrome-relay setup` and read its output.
-3. Loading the extension is my job, not yours. Tell me the exact path of the clone&#x27;s `extension` folder, then walk me through it: in each Chrome profile I want agents to use, open chrome://extensions, turn on Developer mode, click Load unpacked and pick that folder. Wait until I say it&#x27;s done.
-4. Run `chrome-relay doctor` and fix whatever it reports until every line is ok.
+3. Loading the extension is my job, not yours. Tell me the exact path of the clone&#x27;s `extension` folder, then walk me through it: in each Chrome profile I want agents to use, open chrome://extensions, turn on Developer mode, click Load unpacked and pick that folder, then pin it (the puzzle-piece icon in the toolbar, then the pin next to Chrome Relay). Wait until I say it&#x27;s done.
+4. Run `chrome-relay notify test`: macOS asks me to allow notifications from Chrome Relay, which is how I hear that an agent needs me (a sign-in, a passkey to approve). Tell me to allow them, and to let Chrome Relay through any Focus / Do Not Disturb I use. Then run `chrome-relay doctor` and fix whatever it reports until every line is ok.
 5. Run `chrome-relay identities`, show me the profiles it found, and ask which email to use by default and which (if any) only for admin work.
 6. Smoke test with the default profile:
    agent-browser --cdp &quot;$(chrome-relay url &lt;email&gt;)&quot; open https://github.com
@@ -396,7 +396,8 @@ Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
    agent-browser close
    Then confirm with me that nothing moved on my screen.
 7. Make sure all my agents know how to use it. Claude Code already has it: setup linked the chrome-relay skill. For Codex, Cursor or other agents, propose a one-line addition to their global instructions (for example ~/.codex/AGENTS.md) that points to &lt;clone&gt;/skill/SKILL.md for any browser step that needs my logins. Show me the edit before you save it.
-8. Signing in with 1Password is optional and off by default. Ask me whether I want my agents to sign in to some sites with logins from my 1Password (passwords, 2-step codes, passkeys). If not, skip this. If so, it needs the build with Xcode&#x27;s command line tools, and the 1Password app with Settings &gt; Developer &gt; &quot;Integrate with other apps&quot; turned on; point me to the README&#x27;s &quot;Signing in with 1Password&quot; section. Running `chrome-relay vault setup` is my job (it asks me which accounts and vaults, and 1Password asks me to approve); afterwards run `chrome-relay vault` and show me what agents can see.
+8. Signing in with 1Password is optional and off by default. Ask me whether I want my agents to sign in to some sites with logins from my 1Password (passwords, 2-step codes, passkeys). If not, skip this. If so, it needs the build with Xcode&#x27;s command line tools and the 1Password CLI (`brew install 1password-cli`, with 1Password&#x27;s Settings &gt; Developer &gt; &quot;Integrate with 1Password CLI&quot; on); point me to the README&#x27;s &quot;Signing in with 1Password&quot; section. Running `chrome-relay vault setup` is my job: it asks me which 1Password accounts, creates a shared vault and a service account in each, and 1Password asks me to approve. Afterwards remind me to move the logins agents may use into those vaults, then run `chrome-relay vault` and show me what agents can see.
+9. Approving from my iPhone is optional too. Ask me whether I want to approve agents&#x27; sign-ins with Face ID on my iPhone when I&#x27;m away from the Mac. If so, point me to the README&#x27;s &quot;Approving from your iPhone&quot; section: the iPhone app is built from the repo&#x27;s ios/ folder with Xcode (`./ios/build`, iPhone plugged in), and `chrome-relay phone pair` shows a QR code I scan. Don&#x27;t run those yourself unless I ask.
 
 Rules while you do this:
 - Never print, log or paste the URL from `chrome-relay url`. It contains this Mac&#x27;s secret.
@@ -465,11 +466,11 @@ Rules while you do this:
       </details>
       <details>
         <summary>Can an agent sign in for me?</summary>
-        <p>Not with your own passwords. If a Google account chooser shows an account that is already signed in, the extension picks it. If a page needs a password, passkey or 2-step code, the agent stops and asks you to sign in in your own window. If you want, you can let them sign in with 1Password (<code>chrome-relay vault setup</code>): you pick the accounts and vaults they may use. They fill a field with a reference like <code>op://Private/GitHub/password</code>, and the relay types the value, only on that item&#x27;s website. Agents never see it, and they can use 2-step codes and passkeys too. You approve with Touch ID, and Chrome Relay’s prompt names the agent, the item and the site.</p>
+        <p>Not with your own passwords. If a Google account chooser shows an account that is already signed in, the extension picks it. If a page needs a password, passkey or 2-step code, the agent stops and asks you to sign in in your own window. If you want, you can let them sign in with 1Password (<code>chrome-relay vault setup</code>): in the 1Password accounts you pick, Chrome Relay creates a shared vault for agents and a service account that can open only that vault. They fill a field with a reference like <code>op://Shared with Chrome Relay/GitHub/password</code>, and the relay types the value, only on that item&#x27;s website. Agents never see it, and they can use 2-step codes and passkeys too. You approve with Touch ID on the Mac or, if you pair it, Face ID on your iPhone, and the prompt names the agent, the item and the site. If an agent is stuck waiting for you, your Mac shows a notification.</p>
       </details>
       <details>
         <summary>Do I have to use 1Password or passkeys?</summary>
-        <p>No. Chrome Relay works without them: background tabs, your existing logins, Google account pickers and the audit trail are the core. Signing in with 1Password stays off until you run <code>chrome-relay vault setup</code>, and <code>chrome-relay vault forget</code> turns it off again. <code>chrome-relay passkeys off</code> stops agent tabs from answering passkey requests. If you sign in with passkeys a lot, <code>chrome-relay passkeys reuse 120</code> lets one Touch ID cover an agent’s passkey sign-ins for two minutes. It is off by default.</p>
+        <p>No. Chrome Relay works without them: background tabs, your existing logins, Google account pickers and the audit trail are the core. Signing in with 1Password stays off until you run <code>chrome-relay vault setup</code>, and <code>chrome-relay vault forget</code> turns it off again. <code>chrome-relay passkeys off</code> stops agent tabs from answering passkey requests. If you sign in with passkeys a lot, <code>chrome-relay passkeys reuse 120</code> lets one approval cover an agent’s passkey sign-ins for two minutes. It is off by default.</p>
       </details>
       <details>
         <summary>Does it work on Windows or Linux?</summary>

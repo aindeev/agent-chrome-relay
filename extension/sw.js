@@ -8,6 +8,7 @@ relayPort.then((port) => port !== 9333 && chrome.action.setTitle({ title: `Chrom
 let ws = null, email = "";
 const agentTabs = new Set();
 const agentGroups = new Map();    // windowId -> the tab group THIS extension created for agents (never matched by title)
+let nativeNotify = false;         // the relay notifies through Chrome Relay.app: then this extension doesn't, too
 let siteAccounts = {};            // host -> Google account email, from ~/.chrome-relay/identities.json via the relay
 // Agent tabs survive a service-worker restart in session storage, so a later cleanup knows exactly which tabs are ours.
 const remember = () => chrome.storage.session.set({ agentTabs: [...agentTabs], agentGroups: [...agentGroups] }).catch(() => {});
@@ -117,7 +118,7 @@ async function handle(m) {
   if (m.op === "reload") { send({ id: m.id, result: {} }); return chrome.runtime.reload(); }  // pick up a new version from disk
   try {
     if (m.op === "config") {
-      siteAccounts = m.siteAccounts || {};
+      siteAccounts = m.siteAccounts || {}; nativeNotify = !!m.notifier;
       // A different relay instance means the relay restarted and its agents are gone: close the tabs it left.
       const { relayInstance } = await chrome.storage.session.get(["relayInstance"]).catch(() => ({}));
       if (m.instance && relayInstance && relayInstance !== m.instance) await closeAgentTabs();
@@ -125,7 +126,14 @@ async function handle(m) {
       if (m.instance) await chrome.storage.session.set({ relayInstance: m.instance }).catch(() => {});
       return send({ id: m.id, result: {} });
     }
-    if (m.op === "handoff") { handoffs.set(m.tabId, m.rpId || "a site"); showHandoffs(); return send({ id: m.id, result: {} }); }
+    if (m.op === "attend") {   // the person clicked Chrome Relay.app's notification for this tab
+      if (agentTabs.has(m.tabId)) await bringForward(m.tabId);
+      return send({ id: m.id, result: {} });
+    }
+    if (m.op === "handoff") {
+      if (!handoffs.has(m.tabId) && !nativeNotify) notifyHandoff(m.tabId, m.rpId || "a site");
+      handoffs.set(m.tabId, m.rpId || "a site"); showHandoffs(); return send({ id: m.id, result: {} });
+    }
     if (m.op === "version") return send({ id: m.id, result: { version: chrome.runtime.getManifest().version } });
     if (m.op === "create") {
       const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
@@ -173,9 +181,25 @@ chrome.debugger.onDetach.addListener(async (src, reason) => {
   send({ detached: { tabId, reason: "blocked", url } });
 });
 // Passkeys only 1Password holds: the relay hands the request to 1Password's own prompt in the agent tab, which
-// needs the person. The toolbar icon shows a badge, and clicking it opens that tab (the only time an agent tab
-// is brought forward, and only by the person's click).
+// needs the person. A notification says so (the toolbar badge alone is hidden while the extension isn't pinned),
+// and clicking it, or the toolbar icon, opens that tab (the only time an agent tab is brought forward, and only
+// by the person's click).
 const handoffs = new Map();   // tabId -> relying party waiting for approval
+function notifyHandoff(tabId, rp) {
+  chrome.notifications?.create(`handoff-${tabId}`, {
+    type: "basic", iconUrl: "icons/icon-128.png", priority: 2, requireInteraction: true,
+    title: "Chrome Relay: your passkey is needed",
+    message: `An agent is signing in to ${rp} and needs your passkey from 1Password. Click to open its tab and approve.`,
+  }).catch(() => {});
+}
+// The only way an agent tab comes forward: the person asked for it (a notification, or the toolbar icon).
+async function bringForward(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null); if (!tab) return false;
+  await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+  return true;
+}
+async function openHandoff(tabId) { if (!await bringForward(tabId)) clearHandoff(tabId); }
 function showHandoffs() {
   const [rp] = handoffs.values();
   chrome.action.setBadgeText({ text: handoffs.size ? "key" : "" }).catch(() => {});
@@ -183,12 +207,19 @@ function showHandoffs() {
   if (handoffs.size) chrome.action.setTitle({ title: `Chrome Relay: an agent needs your passkey for ${rp}. Click to open its tab and approve in 1Password.` }).catch(() => {});
   else relayPort.then((port) => chrome.action.setTitle({ title: port !== 9333 ? `Chrome Relay (dev mode, relay on port ${port})` : chrome.runtime.getManifest().action.default_title })).catch(() => {});
 }
-function clearHandoff(tabId) { if (handoffs.delete(tabId)) showHandoffs(); }
-chrome.action?.onClicked.addListener(async () => {   // (absent in the extension's test harness)
-  const [tabId] = handoffs.keys(); if (tabId == null) return;
-  const tab = await chrome.tabs.get(tabId).catch(() => null); if (!tab) return clearHandoff(tabId);
-  await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-  await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+function clearHandoff(tabId) {
+  if (!handoffs.delete(tabId)) return;
+  chrome.notifications?.clear(`handoff-${tabId}`).catch(() => {});
+  showHandoffs();
+}
+chrome.action?.onClicked.addListener(() => {   // (absent in the extension's test harness)
+  const [tabId] = handoffs.keys(); if (tabId != null) openHandoff(tabId);
+});
+chrome.notifications?.onClicked.addListener(async (id) => {
+  const tabId = Number(id.replace(/^(handoff|attn)-/, ""));
+  chrome.notifications.clear(id).catch(() => {});
+  if (handoffs.has(tabId)) return openHandoff(tabId);
+  bringForward(tabId);   // a sign-in page: open it in the person's window
 });
 
 // Google sign-in hops (IAP, "Sign in with Google"): when the right account is ALREADY signed in, click it
@@ -217,15 +248,28 @@ function hostOfAuth(u) {
 async function handleGoogleAuth(tabId) {
   if (authing.has(tabId)) return; authing.add(tabId);
   try {
+    let last = null;   // the last click: Google needs a moment to act on it, and a page that ignores it is never clicked for ever
     for (let i = 0; i < 100 && agentTabs.has(tabId); i++) {
       const tab = await chrome.tabs.get(tabId).catch(() => null); if (!tab) return;
       if (!/^https:\/\/accounts\.google\.com\//.test(tab.url || "")) return;          // hop finished
       const site = hostOfAuth(tab.url); const account = siteAccounts[site] || email;
-      if (tab.status === "complete") {
+      if (last && last.url !== tab.url) last = null;
+      if (last && last.n >= 3 && Date.now() - last.at > 3000) {
+        return send({ auth: { tabId, site, account, needsUser: `clicking ${last.what} on Google's page did nothing`, url: tab.url.split("?")[0] } });
+      }
+      if (tab.status === "complete" && !(last && Date.now() - last.at < 3000)) {
         const [r] = await chrome.scripting.executeScript({ target: { tabId }, func: googleAuthStep, args: [account] }).catch((e) => { send({ auth: { tabId, error: String(e) } }); return [{ result: { state: "waiting" } }]; });
         const res = r && r.result || { state: "waiting" };
-        if (res.state === "clicked") send({ auth: { tabId, site, account, action: res.what } });
-        if (res.state === "needs_user") return send({ auth: { tabId, site, account, needsUser: res.why, url: tab.url.split("?")[0] } });
+        if (res.state === "clicked") { last = { url: tab.url, what: res.what, at: Date.now(), n: (last ? last.n : 0) + 1 }; send({ auth: { tabId, site, account, action: res.what } }); }
+        if (res.state === "needs_user") {
+          // the agent is told too, but the person may not be watching it: say so on the Mac
+          if (!nativeNotify) chrome.notifications?.create(`attn-${tabId}`, {
+            type: "basic", iconUrl: "icons/icon-128.png", priority: 2,
+            title: "Chrome Relay: an agent needs you to sign in",
+            message: `${res.why}${site ? ` (for ${site})` : ""}. Sign in as ${account} in this profile, then tell the agent to retry. Click to open the page.`,
+          }).catch(() => {});
+          return send({ auth: { tabId, site, account, needsUser: res.why, url: tab.url.split("?")[0] } });
+        }
       }
       await new Promise((r) => setTimeout(r, 250));
     }
