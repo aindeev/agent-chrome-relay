@@ -133,7 +133,7 @@ final class Store: ObservableObject {
       let proof = try keys.sign(Data("\(Tags.pair)\n".utf8) + o.secret, reason: "Pair with \(o.name) to approve its agents' requests")
       var fields: [String: Any] = ["sign": sign.base64EncodedString(), "device": UIDevice.current.name, "proof": proof.base64EncodedString()]
       if let hex = PushDelegate.address { // where Apple push reaches this app, so the Mac can wake it
-        fields["push"] = ["token": hex, "topic": Bundle.main.bundleIdentifier ?? "", "sandbox": true]
+        fields["push"] = ["token": hex, "topic": Bundle.main.bundleIdentifier ?? "", "sandbox": PushAddress.isSandbox]
       }
       let body = try JSONSerialization.data(withJSONObject: fields)
       let sealed = try keys.seal(body, to: o.relayKey, salt: o.secret, info: Tags.pair)

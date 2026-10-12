@@ -41,13 +41,26 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
 struct PushAddress: Codable {
   let token: String
   let topic: String   // this app's bundle id
-  let sandbox: Bool   // development-signed builds (./ios/build) get sandbox addresses
+  let sandbox: Bool   // development-signed builds (./ios/build) get sandbox addresses; TestFlight and App Store ones don't
+
+  /// Which APNs this copy of the app gets push through. A development build carries its provisioning profile, which
+  /// says aps-environment "development"; TestFlight and App Store builds carry none and use production.
+  static let isSandbox: Bool = {
+    guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+          let raw = try? Data(contentsOf: url),
+          let text = String(data: raw, encoding: .isoLatin1),
+          let start = text.range(of: "<?xml"), let end = text.range(of: "</plist>"),
+          let plist = try? PropertyListSerialization.propertyList(from: Data(text[start.lowerBound..<end.upperBound].utf8), format: nil) as? [String: Any],
+          let ent = plist["Entitlements"] as? [String: Any]
+    else { return false }
+    return (ent["aps-environment"] as? String) == "development"
+  }()
 }
 
 extension Store {
   /// Seals the push address to each paired Mac on "<topic>-dev"; the Mac picks the latest up before it next asks.
   func sendPushAddress(_ hex: String) async {
-    let address = PushAddress(token: hex, topic: Bundle.main.bundleIdentifier ?? "", sandbox: true)
+    let address = PushAddress(token: hex, topic: Bundle.main.bundleIdentifier ?? "", sandbox: PushAddress.isSandbox)
     guard let plain = try? JSONEncoder().encode(address) else { return }
     for mac in macs {
       guard let keys = mac.keys,

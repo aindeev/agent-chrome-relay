@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Builds Chrome Relay Approve for TestFlight and uploads it to App Store Connect: ./ios/release
+#
+# Needs the paid Apple Developer Program, Xcode signed in (Settings > Accounts) with an account that may publish for
+# the team, xcodegen, and the app created once in App Store Connect (Apps > + > New App) with the bundle ID this
+# prints. Each run is a new build (its number is the time), which shows in TestFlight a few minutes after upload.
+set -euo pipefail
+cd "$(dirname "$0")"
+die() { echo "ios/release: $*" >&2; exit 1; }
+command -v xcodegen >/dev/null || die "needs xcodegen: brew install xcodegen"
+
+team=${CHROME_RELAY_IOS_TEAM:-}
+if [ -z "$team" ]; then
+  teams=$(security find-certificate -a -c "Apple Development" -p 2>/dev/null | awk '/BEGIN/{c=""} {c=c $0 "\n"} /END/{printf "%s", c | "openssl x509 -noout -subject"; close("openssl x509 -noout -subject")}' |
+    sed -n 's/.*OU *= *\([A-Z0-9]\{10\}\).*/\1/p' | sort -u)
+  [ "$(printf '%s\n' "$teams" | sed '/^$/d' | wc -l | tr -d ' ')" = 1 ] || die "pick your team: CHROME_RELAY_IOS_TEAM=<team id> ./ios/release (yours: $(echo $teams))"
+  team=$teams
+fi
+export CHROME_RELAY_IOS_TEAM=$team
+export CHROME_RELAY_IOS_ENTITLEMENTS="Approve/Push.entitlements"
+export CHROME_RELAY_IOS_BUNDLE_ID=${CHROME_RELAY_IOS_BUNDLE_ID:-dev.chromerelay.approve.$(echo "$team" | tr 'A-Z' 'a-z')}
+build=$(date -u +%Y%m%d%H%M)
+echo "Chrome Relay Approve, bundle ID $CHROME_RELAY_IOS_BUNDLE_ID, build $build"
+xcodegen generate --quiet
+
+rm -rf .derived/release && mkdir -p .derived/release
+xcodebuild -project Approve.xcodeproj -scheme Approve -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath .derived/release/Approve.xcarchive -derivedDataPath .derived -allowProvisioningUpdates \
+  CURRENT_PROJECT_VERSION="$build" -quiet archive
+cat > .derived/release/export.plist <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>method</key><string>app-store-connect</string>
+  <key>destination</key><string>upload</string>
+  <key>teamID</key><string>$team</string>
+  <key>signingStyle</key><string>automatic</string>
+  <key>uploadSymbols</key><true/>
+  <key>manageAppVersionAndBuildNumber</key><false/>
+</dict></plist>
+PLIST
+# signs for distribution (production push) and uploads; Xcode makes the distribution certificate if there is none
+xcodebuild -exportArchive -archivePath .derived/release/Approve.xcarchive -exportOptionsPlist .derived/release/export.plist \
+  -exportPath .derived/release/export -allowProvisioningUpdates
+echo "uploaded build $build. It appears in App Store Connect > TestFlight once Apple has processed it (usually 5-15 minutes)."

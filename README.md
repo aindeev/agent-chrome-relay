@@ -249,7 +249,7 @@ two layers:
 
 When you're away from the Mac, a paired iPhone can approve instead: `chrome-relay phone pair` (after Touch ID)
 shows a QR code; scan it with the iPhone's Camera and open it in *Chrome Relay Approve* (`ios/`, built and
-installed with `./ios/build`). From then on every approval goes to Touch ID here and to the iPhone at once, and
+installed with `./ios/build`, or sent to TestFlight with `./ios/release` so others install it from there). From then on every approval goes to Touch ID here and to the iPhone at once, and
 the first answer wins. The iPhone shows the Mac, the agent and what it asks, and approves with Face ID: its key
 for that lives in the iPhone's Secure Enclave, and the Mac checks the signature against the key it paired with,
 so nothing in between can approve. Requests and answers travel through [ntfy](https://ntfy.sh) (or your own
