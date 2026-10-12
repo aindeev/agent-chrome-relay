@@ -36,9 +36,9 @@ import (
 // PasskeySection is the section of a Login item where Chrome Relay keeps a passkey it made.
 const PasskeySection = "Passkey (Chrome Relay)"
 
-// Ref: the whole typed text is a secret reference, op://<vault>/<item>/[<section>/]<field>[?attribute=otp].
-// Vault and item names may contain spaces.
-var Ref = regexp.MustCompile(`(?i)^op://([^/\s][^/]*)/([^/\s][^/]*)/(?:[^/]+/)?([^/?]+)(?:\?attribute=(otp|totp))?$`)
+// Ref: the whole typed text is a secret reference, op://<vault>/<item>/[<section>/]<field>[?<options>]. Vault and
+// item names may contain spaces. Options: attribute=otp (fill the field's current code), or new (save: see Save).
+var Ref = regexp.MustCompile(`(?i)^op://([^/\s][^/]*)/([^/\s][^/]*)/(?:[^/]+/)?([^/?]+)(?:\?(\S*))?$`)
 
 // Store is 1Password, as the relay uses it (the SDK client, or a test double).
 type Store interface {
@@ -341,7 +341,15 @@ func (v *Vault) Resolve(ctx context.Context, ref, pageURL string, who Who) (Valu
 	if m == nil {
 		return Value{}, errors.New("not a 1Password secret reference")
 	}
-	vaultName, itemName, fieldName, attribute := m[1], unescape(m[2]), unescape(m[3]), m[4]
+	vaultName, itemName, fieldName := m[1], unescape(m[2]), unescape(m[3])
+	q, _ := url.ParseQuery(m[4])
+	if q.Has("new") {
+		return Value{}, errors.New("a reference with ?new saves a new secret (Save), it doesn't fill one")
+	}
+	attribute := strings.ToLower(q.Get("attribute"))
+	if attribute != "" && attribute != "otp" && attribute != "totp" {
+		return Value{}, fmt.Errorf("unknown option ?%s: only ?attribute=otp, or ?new to save", m[4])
+	}
 	s := v.Settings()
 	if len(s.Vaults()) == 0 {
 		return Value{}, v.notSetUp()

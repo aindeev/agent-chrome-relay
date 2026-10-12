@@ -79,6 +79,35 @@ agent-browser fill @e7 "op://Shared with Chrome Relay/GitHub/otp" # the current 
 - Not set up (`chrome-relay vault` says so), or their Chrome Relay was built without 1Password? It's optional,
   and setting it up is the person's job (`chrome-relay vault setup`): ask them, never do it yourself.
 
+## Saving new logins and 2-step codes
+
+When the person asks you to create an account or turn on 2-step verification, Chrome Relay saves the secret to
+1Password itself. You name it with a reference ending in `?new`, and never see the value:
+
+```bash
+# sign-up: Chrome Relay makes a strong password, saves the login, types it
+agent-browser fill @email "bot@acme.com"
+agent-browser fill @pw "op://Shared with Chrome Relay/Acme/password?new&username=bot@acme.com"
+agent-browser fill @pw2 "op://Shared with Chrome Relay/Acme/password?new&username=bot@acme.com"  # "confirm": the same one
+# 2-step verification: on the page that shows the QR code, Chrome Relay reads the key, saves it, types the code
+agent-browser fill @code "op://Shared with Chrome Relay/Acme/otp?new"
+```
+
+- **Pick the vault deliberately**: the account's (a work sign-up into the work vault), as `chrome-relay vault`
+  lists them. If it isn't clear, ask.
+- The person approves each save (Touch ID or their iPhone), seeing the site and the account. The new login is a
+  Login item titled as you named it, for the page's site, tagged `chrome-relay-saved`.
+- Password rules: add `&length=16` (12 to 64) or `&symbols=no` if the site rejects the default (24 characters with
+  symbols). After a refusal, ask the person rather than trying again: the first password is saved already.
+- One login per site and account: if one exists, the save is refused and names its reference; fill that instead.
+  Changing an existing password is the person's job.
+- 2-step setup: the page must show the key, as a QR code or as text (many sites hide the text key behind "can't
+  scan?" or "enter a setup key": click that first if the save says there's no key). On a login Chrome Relay saved,
+  the key goes into it; on the person's own login, into a separate item "<item> one-time code · Chrome Relay"
+  beside it (Chrome Relay never changes the person's items). From then on fill `op://<vault>/<that item>/otp`.
+- Don't read the setup key or the backup codes off the page into your output. Backup (recovery) codes aren't saved
+  for you: tell the person to keep them.
+
 ## Passkeys
 
 Passkeys need no command: when a page asks for one (a "Sign in with a passkey" button), your tab answers it.

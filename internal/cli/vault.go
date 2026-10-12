@@ -124,7 +124,7 @@ func (c *cli) vaultSetup(a setupArgs, p *prompter) error {
 		}
 		fmt.Fprintf(c.errw, `Agents will sign in with the logins in the 1Password vault "%s", and nothing else. On 1Password.com
 (Developer > Directory > Service Accounts), create a service account with access to that vault only: "Read Items"
-to sign in, plus "Write Items" so agents can save new passkeys there. Paste its token here, or pipe it in:
+to sign in, plus "Write Items" so agents can save new logins, 2-step codes and passkeys there. Paste its token here, or pipe it in:
 op read 'op://<vault>/<item>/credential' | %s vault setup <vault> --paste
 `, name, c.Name)
 		// piped in (op read 'op://<vault>/<item>/credential' | ...) or typed at a hidden prompt; never an argument

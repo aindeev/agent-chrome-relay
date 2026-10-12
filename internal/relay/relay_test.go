@@ -226,6 +226,7 @@ type fakeChrome struct {
 	value   string
 	fail    map[string]string // DevTools method -> error to answer with
 	late    bool              // the page loaded while the debugger was off
+	setup   map[string]any    // what otpsetup.js finds on the page: {uris, keys}
 }
 
 func (h *harness) extension(profile string) *fakeChrome {
@@ -246,6 +247,9 @@ func (h *harness) extension(profile string) *fakeChrome {
 			}
 			if m["method"] == "Runtime.evaluate" {
 				expr := fmt.Sprint(m["params"].(map[string]any)["expression"])
+				if strings.Contains(expr, "BarcodeDetector") { // otpsetup.js
+					return map[string]any{"result": map[string]any{"type": "object", "value": f.setup}}, ""
+				}
 				if strings.Contains(expr, "__agentBridgeLate") {
 					return map[string]any{"result": map[string]any{"type": "boolean", "value": f.late}}, ""
 				}
@@ -727,7 +731,16 @@ func (s *memStore) Create(_ context.Context, p op.ItemCreateParams) (op.Item, er
 	s.items = append(s.items, it)
 	return it, nil
 }
-func (s *memStore) Put(_ context.Context, it op.Item) (op.Item, error) { return it, nil }
+func (s *memStore) Put(_ context.Context, it op.Item) (op.Item, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.items {
+		if s.items[i].ID == it.ID {
+			s.items[i] = it
+		}
+	}
+	return it, nil
+}
 
 type memPerson struct {
 	mu        sync.Mutex
@@ -993,5 +1006,87 @@ func TestSiteRulesFollowTheProfilesAccounts(t *testing.T) {
 		if got != want || sa["mail.example"] != "me@gmail.com" {
 			t.Errorf("%s: %v", prof, sa)
 		}
+	}
+}
+
+func TestAgentsSaveNewLoginsAndOneTimeCodesTheyNeverSee(t *testing.T) {
+	h := newHarness(t)
+	chrome := h.extension("me@example.com")
+	a := h.agent("me@example.com")
+	sid, tab := openTab(a, 1)
+	n := 10.0
+	cmd := func(method string, params any) map[string]any {
+		n++
+		a.send(map[string]any{"id": n, "sessionId": sid, "method": method, "params": params})
+		return a.next(id(n))
+	}
+	typed := func() []string {
+		var out []string
+		for _, m := range chrome.all(func(m map[string]any) bool { return m["method"] == "Input.insertText" }) {
+			out = append(out, fmt.Sprint(m["params"].(map[string]any)["text"]))
+		}
+		return out
+	}
+	chrome.event(tab, "Page.frameNavigated", map[string]any{"frame": map[string]any{"id": "F", "url": "https://app.acme.test/signup"}})
+	a.next(func(m map[string]any) bool { return m["method"] == "Page.frameNavigated" })
+
+	ref := "op://Agents/Acme/password?new&username=bot@acme.test"
+	if r := cmd("Input.insertText", map[string]any{"text": ref}); r["result"] == nil {
+		t.Fatal("new password:", r)
+	}
+	if r := cmd("Input.insertText", map[string]any{"text": ref}); r["result"] == nil { // "confirm password"
+		t.Fatal("confirm:", r)
+	}
+	got := typed()
+	if len(got) != 2 || got[0] != got[1] || len(got[0]) != 24 {
+		t.Fatal("the same new password, twice:", got)
+	}
+	saved := h.store.items[len(h.store.items)-1]
+	if saved.Title != "Acme" || vault.PickField(saved, "password", false).Value != got[0] || !slices.Contains(saved.Tags, vault.SavedTag) {
+		t.Fatalf("saved in 1Password: %+v", saved)
+	}
+	if len(h.person.approvals) != 1 || !strings.Contains(h.person.approvals[0], "save a new login for app.acme.test as bot@acme.test") {
+		t.Fatal("one approval for the save:", h.person.approvals)
+	}
+	chrome.mu.Lock()
+	chrome.value = got[0]
+	chrome.focused = map[string]any{"tag": "INPUT", "type": "text"}
+	chrome.mu.Unlock()
+	if r := cmd("Runtime.evaluate", map[string]any{"expression": "document.querySelector('input').value"}); r["result"].(map[string]any)["result"].(map[string]any)["value"] != "••••••••" {
+		t.Error("read back masked:", r)
+	}
+	if !strings.Contains(errMsg(cmd("Input.insertText", map[string]any{"text": "op://Agents/Other/password?new&username=x@acme.test"})), "only goes into a password field") {
+		t.Error("a new password only into a password field")
+	}
+
+	// 2-step: the setup key comes from the page, never from the agent
+	chrome.mu.Lock()
+	chrome.setup = map[string]any{"uris": []any{}, "keys": []any{}}
+	chrome.mu.Unlock()
+	if !strings.Contains(errMsg(cmd("Input.insertText", map[string]any{"text": "op://Agents/Acme/otp?new"})), "shows no 2-step setup key") {
+		t.Error("no key on the page")
+	}
+	chrome.mu.Lock()
+	chrome.setup = map[string]any{"uris": []any{"otpauth://totp/Acme:bot?secret=JBSWY3DPEHPK3PXP&issuer=Acme"}, "keys": []any{"JBSWY3DPEHPK3PXP"}}
+	chrome.mu.Unlock()
+	if r := cmd("Input.insertText", map[string]any{"text": "op://Agents/Acme/otp?new"}); r["result"] == nil {
+		t.Fatal("2-step:", r)
+	}
+	if code, _, _ := vault.TOTP("JBSWY3DPEHPK3PXP", time.Now()); typed()[2] != code {
+		t.Error("the current code is typed:", typed())
+	}
+	if f := vault.PickField(h.store.items[len(h.store.items)-1], "otp", true); f == nil || !strings.Contains(f.Value, "JBSWY3DPEHPK3PXP") {
+		t.Error("the setup key is saved with the login")
+	}
+	a.mu.Lock()
+	all, _ := json.Marshal(a.got)
+	a.mu.Unlock()
+	if strings.Contains(string(all), got[0]) || strings.Contains(string(all), "JBSWY3DPEHPK3PXP") {
+		t.Error("the agent received a secret")
+	}
+	time.Sleep(100 * time.Millisecond)
+	b, _ := os.ReadFile(filepath.Join(h.home, "audit", time.Now().UTC().Format("2006-01-02")+".jsonl"))
+	if !strings.Contains(string(b), `"event":"1password saved login"`) || !strings.Contains(string(b), `"event":"1password saved one-time code"`) || strings.Contains(string(b), got[0]) {
+		t.Error("audit: saves, no secrets:", string(b))
 	}
 }

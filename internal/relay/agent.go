@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"github.com/aindeev/agent-chrome-relay/internal/vault"
 	"math"
 	"net/url"
 	"os"
@@ -25,6 +26,8 @@ var (
 	quietShim string
 	//go:embed shims/focused.js
 	focusedExpr string
+	//go:embed shims/otpsetup.js
+	otpSetupExpr string
 )
 
 const binding = "__agentBridgeOpen"
@@ -110,11 +113,19 @@ type Agent struct {
 	orphans              []int
 	blocked              string
 	pageQ                chan pageCall
+	newLogins            map[string]newLogin // ?new references this agent saved: the "confirm password" field gets the same
+}
+
+// newLogin: a password Chrome Relay just made and saved, for the next fields of the same sign-up.
+type newLogin struct {
+	v  vault.Value
+	at time.Time
 }
 
 func (a *Agent) init() {
 	a.tabs, a.child, a.setup, a.paused = map[int]bool{}, map[string]int{}, map[int][]step{}, map[int]*pause{}
 	a.lastInput, a.contexts, a.handoffs, a.filled = map[int]time.Time{}, map[int]map[int]ctxInfo{}, map[int]handoff{}, map[int]string{}
+	a.newLogins = map[string]newLogin{}
 	a.targetURLs, a.urls, a.mainFrames, a.popups, a.openerOf = map[int]string{}, map[int]string{}, map[int]string{}, map[string]int{}, map[int][2]int{}
 	// In order: `window.open(); w.location = url` sends "open" then "nav" back to back, and "nav" needs the tab "open" creates.
 	a.pageQ = make(chan pageCall, 1024)
@@ -297,7 +308,11 @@ func (a *Agent) onMessage(m message) {
 		}
 		P := m.params()
 		if text, ok := P["text"].(string); ok && m.Method == "Input.insertText" && vaultRef(strings.TrimSpace(text)) {
-			a.fillSecret(tab, child, m, strings.TrimSpace(text))
+			if r, save, err := vault.ParseSave(strings.TrimSpace(text)); save {
+				a.saveSecret(tab, child, m, strings.TrimSpace(text), r, err)
+			} else {
+				a.fillSecret(tab, child, m, strings.TrimSpace(text))
+			}
 			return
 		}
 		if (m.Method == "Input.dispatchMouseEvent" && P["type"] == "mousePressed") || (m.Method == "Input.dispatchKeyEvent" && (P["type"] == "rawKeyDown" || P["type"] == "keyDown")) {
