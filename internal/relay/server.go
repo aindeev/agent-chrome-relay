@@ -1,15 +1,18 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -51,6 +54,7 @@ type Server struct {
 	// how often identities.json is checked for changes; how long a command on a tab waiting for the person's
 	// 1Password passkey approval waits before saying so
 	watchEvery, handoffWait time.Duration
+	notify                  func(args ...string) // runs Chrome Relay.app; nil without it
 }
 
 type authNote struct {
@@ -136,33 +140,87 @@ func New(o Options) (*Server, error) {
 	s := &Server{opt: o, token: strings.TrimSpace(string(tok)), instance: hex.EncodeToString(b), profiles: map[string]*profile{}, last: map[string]string{},
 		agents: map[*Agent]bool{}, notes: map[int]authNote{}, isChrome: isChrome,
 		watchEvery: 2 * time.Second, handoffWait: 15 * time.Second}
+	if o.Notifier != "" {
+		s.notify = func(args ...string) {
+			go exec.Command("open", append([]string{"-g", "-n", o.Notifier, "--args"}, args...)...).Run()
+		}
+	}
 	s.caller = func(port int) Caller { return findCaller(port, os.Getenv("CHROME_RELAY_CHECK_TREE") == "0") }
 	cli := "chrome-relay"
 	if o.Instance != "" {
 		cli = "chrome-relay-" + o.Instance
 	}
 	s.vault = &vault.Vault{Settings: s.vaultSettings, Connect: vault.Connect(o.Version), Person: vault.MacPerson{Instance: o.Instance, CLI: cli},
-		Stamp: func() string { return vault.TokenStamp(o.Instance) }, CLI: cli}
+		CLI: cli}
+	s.vault.Stamp = func() string { // a new or removed token reconnects
+		var st []string
+		for _, src := range s.vaultSettings().Sources {
+			st = append(st, vault.TokenStamp(o.Instance, src.Key))
+		}
+		return strings.Join(st, ",")
+	}
 	if macos.Linked { // the core-only build has no Secure Enclave passkeys; 1Password's still work, through the handoff
-		s.chip = chip{}
+		s.chip = chip{instance: o.Instance}
 	}
 	return s, nil
 }
 
 // enclave makes and uses passkeys that never leave the chip: this Mac's Secure Enclave, or a test double.
 type enclave interface {
+	// Create makes a key Chrome Relay approves itself: the chip asks nothing, so approve before signing with it.
 	Create() (handle, publicKey []byte, err error)
+	// Sign: with a relay-approved key (relayApproved), silently; with an older key, the chip asks for Touch ID.
 	Sign(handle, data []byte, reason, scope string, reuse time.Duration) ([]byte, error)
 }
 
-type chip struct{}
+// keychainHandle starts the vault's handle for a key Chrome Relay approves itself (Touch ID here or Face ID on
+// the paired iPhone, before each use): the chip's real handle is in Chrome Relay's Keychain item, which only this
+// signed program reads, so neither the vault nor anything else on the Mac can use the key on its own.
+const keychainHandle = "keychain:"
 
-func (chip) Create() ([]byte, []byte, error) { return macos.PasskeyCreate() }
-func (chip) Sign(handle, data []byte, reason, scope string, reuse time.Duration) ([]byte, error) {
+func relayApproved(handle []byte) bool { return bytes.HasPrefix(handle, []byte(keychainHandle)) }
+
+type chip struct{ instance string }
+
+func (c chip) account(ref string) string {
+	if c.instance != "" {
+		return "passkey key " + ref + " (" + c.instance + ")"
+	}
+	return "passkey key " + ref
+}
+
+func (c chip) Create() ([]byte, []byte, error) {
+	handle, pub, err := macos.PasskeyCreate(true)
+	if err != nil && strings.Contains(err.Error(), "-25308") {
+		return nil, nil, errors.New("this Mac's screen is locked, and its Secure Enclave makes new keys only while it is unlocked: create the passkey when the person is back")
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	b := make([]byte, 12)
+	rand.Read(b)
+	ref := hex.EncodeToString(b)
+	if err := macos.KeychainSet("Chrome Relay", c.account(ref), handle); err != nil {
+		return nil, nil, err
+	}
+	return []byte(keychainHandle + ref), pub, nil
+}
+
+func (c chip) Sign(handle, data []byte, reason, scope string, reuse time.Duration) ([]byte, error) {
+	if ref, ok := bytes.CutPrefix(handle, []byte(keychainHandle)); ok {
+		real, err := macos.KeychainGet("Chrome Relay", c.account(string(ref)))
+		if errors.Is(err, macos.ErrNotFound) {
+			return nil, errors.New("this passkey's key is on another Mac")
+		}
+		if err != nil {
+			return nil, err
+		}
+		return macos.PasskeySign(real, data, "", "", 0)
+	}
 	return macos.PasskeySign(handle, data, reason, scope, reuse)
 }
 
-// scoped: the enclave as one agent uses it, so a Touch ID approval covers only that agent's sign-ins.
+// scoped: the enclave as one agent uses it, so a Touch ID approval of an older passkey covers only that agent's.
 type scoped struct {
 	e     enclave
 	scope string
@@ -178,8 +236,8 @@ var _ passkeys.Chip = scoped{}
 
 // passkeySettings: "passkeys" in config.json. Enabled (default) answers passkey requests in agent tabs (the
 // relay's Secure Enclave passkeys, else 1Password's own prompt); off leaves pages' WebAuthn alone. Every
-// passkey sign-in asks for Touch ID, unless touchIdReuseSeconds (at most 300) lets one approval cover an
-// agent's sign-ins for that long.
+// passkey sign-in is approved (Touch ID here, or Face ID on the paired iPhone), unless approvalReuseSeconds (at
+// most 300; touchIdReuseSeconds before) lets one approval cover an agent's sign-ins for that long.
 type passkeySettings struct {
 	enabled bool
 	reuse   time.Duration
@@ -191,7 +249,11 @@ func (s *Server) passkeySettings() passkeySettings {
 	if on, ok := pk["enabled"].(bool); ok {
 		out.enabled = on
 	}
-	if secs, ok := pk["touchIdReuseSeconds"].(float64); ok && secs > 0 {
+	secs, ok := pk["approvalReuseSeconds"].(float64)
+	if !ok {
+		secs, ok = pk["touchIdReuseSeconds"].(float64)
+	}
+	if ok && secs > 0 {
 		out.reuse = min(time.Duration(secs)*time.Second, 5*time.Minute)
 	}
 	return out
@@ -204,39 +266,30 @@ func (s *Server) config() map[string]any {
 	return c
 }
 
-// vaultSettings: "onepassword" in config.json. {"accounts": [{"account": "my.1password.com", "vaults": ["Private"]}, ...]} for
-// your 1Password accounts through the desktop app; {"vault": "Agents"} for a service account; "approve" for how
-// often Chrome Relay itself asks (sign-in, session, off).
+// vaultSettings: "onepassword" in config.json: {"serviceAccounts": [{"account": "<1Password account UUID>",
+// "label": "you@example.com", "vault": "Shared with Chrome Relay"}, ...]}, one per 1Password account, each token in
+// its own Keychain item; or {"vault": "Agents"}, the older single service account. ("accounts", for the 1Password
+// app, is no longer used: it couldn't work in the background.)
 func (s *Server) vaultSettings() vault.Settings {
 	var out vault.Settings
 	op, _ := s.config()["onepassword"].(map[string]any)
 	if op == nil {
 		return out
 	}
-	strs := func(v any) []string {
-		var l []string
-		if xs, ok := v.([]any); ok {
-			for _, x := range xs {
-				if s, ok := x.(string); ok && s != "" {
-					l = append(l, s)
-				}
-			}
-		}
-		return l
-	}
-	if accounts, ok := op["accounts"].([]any); ok {
-		for _, a := range accounts {
-			if m, ok := a.(map[string]any); ok {
-				if name, _ := m["account"].(string); name != "" {
-					out.Sources = append(out.Sources, vault.Source{Account: name, Vaults: strs(m["vaults"])})
-				}
-			}
-		}
-	}
 	if name, _ := op["vault"].(string); name != "" {
 		out.Sources = append(out.Sources, vault.Source{Vaults: []string{name}})
 	}
-	out.Approve, _ = op["approve"].(string)
+	if sas, ok := op["serviceAccounts"].([]any); ok {
+		for _, a := range sas {
+			if m, ok := a.(map[string]any); ok {
+				key, _ := m["account"].(string)
+				label, _ := m["label"].(string)
+				if name, _ := m["vault"].(string); name != "" && key != "" {
+					out.Sources = append(out.Sources, vault.Source{Vaults: []string{name}, Key: key, Label: label})
+				}
+			}
+		}
+	}
 	return out
 }
 
@@ -331,15 +384,37 @@ func (s *Server) readIDs() map[string]any {
 	}
 	return d
 }
-func (s *Server) siteAccounts() map[string]any {
+
+// siteAccounts: which Google account each site uses, for the extension of profile prof. A rule counts only
+// where its account is signed in to that profile (when setup recorded the profile's accounts), so a work rule
+// never sends a personal profile's hop looking for the work account.
+func (s *Server) siteAccounts(prof string) map[string]any {
 	out := map[string]any{}
-	if d := s.readIDs(); d != nil {
-		if sites, ok := d["sites"].(map[string]any); ok {
-			for _, k := range []string{"learned", "rules"} {
-				if m, ok := sites[k].(map[string]any); ok {
-					for site, acc := range m {
-						out[site] = acc
+	d := s.readIDs()
+	if d == nil {
+		return out
+	}
+	var signedIn []string
+	if profiles, ok := d["profiles"].(map[string]any); ok {
+		if p, ok := profiles[prof].(map[string]any); ok {
+			if l, ok := p["googleAccounts"].([]any); ok {
+				for _, x := range l {
+					if a, ok := x.(string); ok {
+						signedIn = append(signedIn, strings.ToLower(a))
 					}
+				}
+			}
+		}
+	}
+	if sites, ok := d["sites"].(map[string]any); ok {
+		for _, k := range []string{"learned", "rules"} {
+			if m, ok := sites[k].(map[string]any); ok {
+				for site, acc := range m {
+					a, _ := acc.(string)
+					if len(signedIn) > 0 && !slices.Contains(signedIn, strings.ToLower(a)) {
+						continue
+					}
+					out[site] = acc
 				}
 			}
 		}
@@ -459,6 +534,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		js(map[string]any{"Browser": "Chrome/ChromeRelay", "Protocol-Version": "1.3", "webSocketDebuggerUrl": ws})
 	case strings.HasPrefix(p, "/json"):
 		js([]any{})
+	case p == "/attend" && authed: // the person clicked a notification: bring that agent tab forward for them
+		tab, _ := strconv.Atoi(q.Get("tab"))
+		s.mu.Lock()
+		pr := s.profiles[prof]
+		if pr != nil {
+			s.extSend(pr, map[string]any{"op": "attend", "tabId": tab})
+		}
+		s.mu.Unlock()
+		js(map[string]any{"ok": pr != nil})
 	case p == "/reload-extensions" && authed:
 		s.mu.Lock()
 		names := []string{}
@@ -650,7 +734,7 @@ func (s *Server) acceptExtension(c *conn, r *http.Request, prof string, port, se
 	s.profiles[prof] = p
 	s.log("extension connected for", prof)
 	config := func() {
-		s.extSend(p, map[string]any{"op": "config", "siteAccounts": s.siteAccounts(), "instance": s.instance})
+		s.extSend(p, map[string]any{"op": "config", "siteAccounts": s.siteAccounts(p.prof), "instance": s.instance, "notifier": s.notify != nil})
 	}
 	config()
 	s.mu.Unlock()
@@ -787,6 +871,15 @@ func (s *Server) onExtension(p *profile, b []byte) {
 		if a.NeedsUser != "" {
 			s.log("sign-in hop: tab", a.TabID, "needs you:", a.NeedsUser, a.Site)
 			s.notes[a.TabID] = authNote{a.TabID, a.Site, a.Account, a.NeedsUser, a.URL}
+			for ag := range s.agents {
+				if pr := ag.p(); ag.tabs[a.TabID] && pr != nil {
+					for_ := ""
+					if a.Site != "" {
+						for_ = " (for " + a.Site + ")"
+					}
+					s.alert(pr.prof, a.TabID, "An agent needs you to sign in", fmt.Sprintf("%s%s. Sign in as %s, then tell the agent to retry. Click to open the page.", a.NeedsUser, for_, a.Account))
+				}
+			}
 		}
 	case m.Paused != nil:
 		s.log("tab", m.Paused.TabID, "paused:", m.Paused.Reason)
@@ -910,3 +1003,20 @@ func (s *Server) sweep() {
 		s.mu.Unlock()
 	}
 }
+
+// alert tells the person an agent's tab needs them, as a notification from Chrome Relay.app; a click opens the tab.
+func (s *Server) alert(prof string, tab int, title, body string) {
+	if s.notify == nil {
+		return
+	}
+	bin, _ := os.Executable()
+	s.notify("notify", alertID(tab), title, body, bin, prof, strconv.Itoa(tab))
+}
+
+func (s *Server) unalert(tab int) {
+	if s.notify != nil {
+		s.notify("clear", alertID(tab))
+	}
+}
+
+func alertID(tab int) string { return "tab-" + strconv.Itoa(tab) }

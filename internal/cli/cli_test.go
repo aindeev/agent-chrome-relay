@@ -282,8 +282,8 @@ func TestPasskeysCommandWritesConfig(t *testing.T) {
 			t.Fatal("core build:", out)
 		}
 	} else {
-		if !strings.Contains(run(), "on. ") || !strings.Contains(run(), "each sign-in asks for Touch ID") {
-			t.Fatal("on by default, Touch ID every time")
+		if !strings.Contains(run(), "on. ") || !strings.Contains(run(), "each sign-in is approved with Touch ID here, or Face ID on a paired iPhone") {
+			t.Fatal("on by default, every sign-in approved")
 		}
 		if !strings.Contains(run("reuse", "120"), "for 120 seconds") {
 			t.Fatal("reuse window")
@@ -293,7 +293,7 @@ func TestPasskeysCommandWritesConfig(t *testing.T) {
 		t.Fatal("off")
 	}
 	b, _ := os.ReadFile(filepath.Join(home, "config.json"))
-	if !strings.Contains(string(b), `"passkeys": {`) || !strings.Contains(string(b), `"enabled": false`) || !strings.Contains(string(b), `"touchIdReuseSeconds": 120`) || !strings.Contains(string(b), `"onepassword"`) {
+	if !strings.Contains(string(b), `"passkeys": {`) || !strings.Contains(string(b), `"enabled": false`) || !strings.Contains(string(b), `"approvalReuseSeconds": 120`) || !strings.Contains(string(b), `"onepassword"`) {
 		t.Fatal("config keeps other keys and gains passkeys:", string(b))
 	}
 }

@@ -10,4 +10,5 @@ type Options struct {
 	Port     int    // 9333, or 9334 for dev mode
 	Instance string // "" or "dev-mode": picks this instance's Keychain item for the 1Password token
 	Version  string
+	Notifier string // Chrome Relay.app, if installed: macOS notifications when an agent needs the person
 }

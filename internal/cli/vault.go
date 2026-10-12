@@ -10,12 +10,14 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/term"
 
 	"github.com/aindeev/agent-chrome-relay/internal/macos"
+	"github.com/aindeev/agent-chrome-relay/internal/phone"
 	"github.com/aindeev/agent-chrome-relay/internal/vault"
 )
 
@@ -36,22 +38,30 @@ func (c *cli) vault() error {
 		}
 		a, err := parseSetupArgs(c.args[min(3, len(c.args)):])
 		if err != nil {
-			return fmt.Errorf("%v\nusage: %s vault setup                        your 1Password app (asks which accounts and vaults)\n"+
-				"       %s vault setup --account <name or uuid> --vaults \"A,B\" [--account ... --vaults ...] [--approve session|sign-in|off]\n"+
-				"       %s vault setup <vault>                a service account for one shared vault", err, c.Name, c.Name, c.Name)
+			return fmt.Errorf("%v\n%s", err, c.setupUsage())
+		}
+		var p *prompter
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			p = newPrompter(os.Stdin, c.errw)
 		}
 		switch {
 		case a.service != "":
-			return c.vaultSetup(a.service)
-		case len(a.sources) > 0:
-			return c.desktopSetupFlags(a, c.desktopEnv())
+			return c.vaultSetup(a, p)
+		case p != nil:
+			return c.serviceSetupInteractive(p)
 		}
-		ask := !a.desktop && term.IsTerminal(int(os.Stdin.Fd()))
-		return c.desktopSetup(newPrompter(os.Stdin, c.errw), c.desktopEnv(), ask)
+		return errors.New(c.setupUsage())
+	case sub == "approve":
+		return c.vaultApprove(c.arg(3))
 	case sub == "forget":
-		err := vault.ForgetToken(c.vaultInstance())
-		c.forgetLegacyToken()
 		cfg := c.config()
+		var err error
+		for _, k := range append(serviceKeys(configuredSources(cfg)), "") {
+			if e := vault.ForgetToken(c.vaultInstance(), k); e != nil {
+				err = e
+			}
+		}
+		c.forgetLegacyToken()
 		cfg.del("onepassword")
 		if serr := c.saveConfig(cfg); serr != nil {
 			return serr
@@ -89,22 +99,46 @@ func truthy(v any) bool {
 	return true
 }
 
-// vaultSetup: a 1Password service account for one shared vault, its token locked to this Mac.
-func (c *cli) vaultSetup(name string) error {
+// vaultSetup: a 1Password service account for one shared vault, its token locked to this Mac. With the 1Password
+// CLI it does everything itself (the vault if it's missing, the service account, the token straight into the
+// Keychain, never shown); --paste, or no CLI, takes a token the person made.
+func (c *cli) vaultSetup(a setupArgs, p *prompter) error {
+	name := a.service
 	if err := checkDuplicates(configuredSources(c.config()), name); err != nil {
 		return err
 	}
-	fmt.Fprintf(c.errw, `Agents will sign in with the logins in the 1Password vault "%s", and nothing else. In 1Password
-(Developer > Service Accounts, or developer.1password.com), create a service account with access to that vault
-only: "Read Items" to sign in, plus "Write Items" so agents can save new passkeys there. Paste its token here,
-or pipe it in: op read 'op://<vault>/<item>/credential' | %s vault setup <vault>
-`, name, c.Name)
-	// piped in (op read 'op://<vault>/<item>/credential' | ...) or typed at a hidden prompt; never an argument
-	raw, err := readSecret("Service account token (ops_..., not shown): ")
-	if err != nil {
-		return err
+	if isPrivateVault(name) {
+		return fmt.Errorf("1Password never lets a service account into a Private vault: choose a shared one, e.g. `%s vault setup \"Shared with Chrome Relay\"` (created if it doesn't exist), and move the logins agents may use there", c.Name)
 	}
-	tok := strings.TrimSpace(raw)
+	var tok string
+	var acct opAccount // where the service account lives; empty for a pasted token without --account
+	if a.paste && a.account != "" {
+		var err error
+		if acct, err = c.pickAccount(a.account, nil); err != nil {
+			return err
+		}
+	}
+	if a.paste || findOp() == "" {
+		if !a.paste {
+			fmt.Fprintf(c.errw, "No 1Password CLI (`brew install 1password-cli`), so Chrome Relay can't create the service account itself.\n")
+		}
+		fmt.Fprintf(c.errw, `Agents will sign in with the logins in the 1Password vault "%s", and nothing else. On 1Password.com
+(Developer > Directory > Service Accounts), create a service account with access to that vault only: "Read Items"
+to sign in, plus "Write Items" so agents can save new passkeys there. Paste its token here, or pipe it in:
+op read 'op://<vault>/<item>/credential' | %s vault setup <vault> --paste
+`, name, c.Name)
+		// piped in (op read 'op://<vault>/<item>/credential' | ...) or typed at a hidden prompt; never an argument
+		raw, err := readSecret("Service account token (ops_..., not shown): ")
+		if err != nil {
+			return err
+		}
+		tok = strings.TrimSpace(raw)
+	} else {
+		var err error
+		if tok, acct, err = c.createServiceAccount(name, a.account, p); err != nil {
+			return err
+		}
+	}
 	if !opsToken.MatchString(tok) {
 		return errors.New("that is not a service account token (they start with ops_)")
 	}
@@ -114,26 +148,71 @@ or pipe it in: op read 'op://<vault>/<item>/credential' | %s vault setup <vault>
 	if err != nil {
 		return fmt.Errorf("1Password: %v", err)
 	}
-	if err := checkDuplicates(configuredSources(c.config()), exact); err != nil {
-		return err
-	}
-	// locked to this Mac's Secure Enclave, in a Keychain item only this program reads
-	if err := vault.SaveToken(c.vaultInstance(), tok); err != nil {
-		return fmt.Errorf("could not keep the token in the Keychain: %v", err)
-	}
-	c.forgetLegacyToken()
+	// this account's service account replaces its previous one, and the older single one if it had this vault
 	cfg := c.config()
 	op1, ok := cfg.get("onepassword").(*object) // keeps your 1Password app's accounts, if any
 	if !ok {
 		op1 = newObject()
 	}
-	op1.set("vault", exact)
-	op1.del("op") // an older Chrome Relay's 1Password CLI: not used any more
+	legacy := strings.EqualFold(op1.str("vault"), exact) || acct.UUID == ""
+	var others []source
+	for _, s := range configuredSources(cfg) {
+		if (s.Key == "" && legacy) || (s.Key != "" && s.Key == acct.UUID) {
+			continue
+		}
+		others = append(others, s)
+	}
+	if err := checkDuplicates(others, exact); err != nil {
+		return err
+	}
+	approve := "sign-in"
+	if acct.UUID != "" { // keep the person's approval setting, if a token already had one
+		for _, k := range serviceKeys(configuredSources(cfg)) {
+			if t, err := (vault.MacPerson{Instance: c.vaultInstance(), CLI: c.Name}).Unlock(k, ""); err == nil && t.Approve != "" {
+				approve = t.Approve
+				break
+			}
+		}
+	}
+	// locked to this Mac's Secure Enclave, in a Keychain item only this program reads
+	if err := vault.SaveToken(c.vaultInstance(), acct.UUID, vault.Token{Value: tok, Approve: approve}); err != nil {
+		return fmt.Errorf("could not keep the token in the Keychain: %v", err)
+	}
+	c.forgetLegacyToken()
+	if acct.UUID == "" {
+		op1.set("vault", exact)
+	} else {
+		if legacy && op1.has("vault") {
+			op1.del("vault")
+			vault.ForgetToken(c.vaultInstance(), "")
+		}
+		list := []any{}
+		for _, x := range asList(op1.get("serviceAccounts")) {
+			if o, ok := x.(*object); ok && o.str("account") != acct.UUID {
+				list = append(list, o)
+			}
+		}
+		o := newObject()
+		o.set("account", acct.UUID)
+		o.set("label", acct.label())
+		o.set("vault", exact)
+		op1.set("serviceAccounts", append(list, o))
+	}
+	op1.del("op")            // an older Chrome Relay's 1Password CLI: not used any more
+	if op1.has("accounts") { // the 1Password app connection, which couldn't work in the background
+		op1.del("accounts")
+		op1.del("approve")
+		fmt.Fprintln(c.errw, "Removed the 1Password app connections from an earlier setup: Chrome Relay uses service accounts only now.")
+	}
 	cfg.set("onepassword", op1)
 	if err := c.saveConfig(cfg); err != nil {
 		return err
 	}
-	c.printf("ok: agents can now use the vault \"%s\" (token in your login Keychain, locked to this Mac's Secure Enclave). Nothing to restart.\n", exact)
+	where := ""
+	if acct.UUID != "" {
+		where = " in " + acct.label()
+	}
+	c.printf("ok: agents can now use the vault \"%s\"%s (token in your login Keychain, locked to this Mac's Secure Enclave). Nothing to restart.\n", exact, where)
 	if c.up() {
 		return c.vaultList()
 	}
@@ -180,6 +259,7 @@ func readSecret(prompt string) (string, error) {
 type vaultItem struct {
 	Vault    string   `json:"vault"`
 	Account  string   `json:"account"`
+	ID       string   `json:"id"`
 	Title    string   `json:"title"`
 	Websites []string `json:"websites"`
 	Username string   `json:"username"`
@@ -226,10 +306,6 @@ func formatVaultList(d vaultSummary, sources []source) string {
   agent-browser fill @eN "op://<vault>/<item>/username"     (also: password, otp, or any field's name)
 
 `, quoteList(vaults))
-	labels := map[string]string{} // account uuid -> what to call it
-	for _, s := range sources {
-		labels[s.Account] = s.label()
-	}
 	for _, v := range vaults {
 		where := ""
 		if s, ok := sourceOf(sources, v); ok {
@@ -240,10 +316,7 @@ func formatVaultList(d vaultSummary, sources []source) string {
 			if strings.EqualFold(i.Vault, v) || (i.Vault == "" && v == vaults[0]) { // an older relay doesn't say which vault
 				items = append(items, i)
 				if where == "" && i.Account != "" {
-					where = labels[i.Account]
-					if where == "" {
-						where = i.Account
-					}
+					where = "service account in " + i.Account
 				}
 			}
 		}
@@ -269,6 +342,9 @@ func formatVaultList(d vaultSummary, sources []source) string {
 			}
 			row := fmt.Sprintf("    %s %s %s %s", pyFormat(cut(i.Title, 30), 30), pyFormat(cut(sites, 40), 40), pyFormat(cut(i.Username, 28), 28), strings.Join(has, ", "))
 			b.WriteString(strings.TrimRight(row, " ") + "\n")
+			if i.ID != "" && slices.ContainsFunc(items, func(o vaultItem) bool { return o.ID != i.ID && strings.EqualFold(o.Title, i.Title) }) {
+				fmt.Fprintf(&b, "      shares its title: refer to it as op://%s/%s/<field>\n", v, i.ID)
+			}
 		}
 		if len(items) == 0 {
 			b.WriteString("    (empty)\n")
@@ -278,4 +354,53 @@ func formatVaultList(d vaultSummary, sources []source) string {
 		b.WriteString("  (empty)\n")
 	}
 	return b.String()
+}
+
+// vaultApprove sets how often Chrome Relay asks before agents sign in with 1Password: every sign-in, once per
+// agent session, or never. Changing it takes the person's approval (Touch ID, or Face ID on a paired iPhone), and
+// with a service account the setting is kept with its token, where no file an agent could edit reaches it.
+func (c *cli) vaultApprove(mode string) error {
+	if !slices.Contains(approveModes, mode) {
+		return fmt.Errorf("usage: %s vault approve session|sign-in|off", c.Name)
+	}
+	if !macos.Linked {
+		return errCoreOnly
+	}
+	what := map[string]string{"session": "once per agent session", "sign-in": "every sign-in", "off": "never"}[mode]
+	person := vault.MacPerson{Instance: c.vaultInstance(), CLI: c.Name}
+	if err := person.Approve(phone.Details{Reason: fmt.Sprintf("change how often it asks before agents sign in with your 1Password to: %s (decline unless you just ran `%s vault approve %s`)", what, c.Name, mode),
+		Agent: c.Name + " in your Terminal", Site: phone.MacName(), What: "approvals: " + what}); err != nil {
+		return err
+	}
+	for _, k := range serviceKeys(configuredSources(c.config())) { // kept with each token
+		t, err := person.Unlock(k, "change how often Chrome Relay asks before agents sign in with your 1Password")
+		if err != nil {
+			return err
+		}
+		t.Approve = mode
+		if err := vault.SaveToken(c.vaultInstance(), k, t); err != nil {
+			return err
+		}
+	}
+	cfg := c.config()
+	op1, ok := cfg.get("onepassword").(*object)
+	if !ok {
+		return fmt.Errorf("1Password isn't set up: `%s vault setup`", c.Name)
+	}
+	op1.set("approve", mode)
+	cfg.set("onepassword", op1)
+	if err := c.saveConfig(cfg); err != nil {
+		return err
+	}
+	c.printf("Chrome Relay now asks %s before agents sign in with 1Password.\n", what)
+	return nil
+}
+
+func (c *cli) setupUsage() string {
+	return fmt.Sprintf(`usage: %[1]s vault setup                      asks which 1Password accounts, then makes a vault and a service account in each
+       %[1]s vault setup <vault> [--account <email or uuid>]
+                                             one account: creates the vault if missing and its service account, with
+                                             your 1Password CLI; the token goes straight into the Keychain
+       %[1]s vault setup <vault> --paste [--account ...]
+                                             a service account you made on 1Password.com: paste or pipe its token`, c.Name)
 }

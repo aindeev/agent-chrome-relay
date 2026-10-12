@@ -1,14 +1,15 @@
 // Package vault gives agents logins from 1Password without ever showing them a secret: the relay reads the
 // vaults the person allowed and types values straight into pages, only on each item's own website.
 //
-// Two ways in. Desktop app (the default for your own logins): the relay connects through your 1Password app,
-// which asks you to approve it, as the account you name and only for the vaults you list; nothing is stored.
-// Service account: a 1Password service account that can only open one shared vault, its token stored locked to
-// this Mac's Secure Enclave in a Keychain item only Chrome Relay reads. Either way Chrome Relay's own Touch ID
-// prompt, naming the agent, item and site, approves sign-ins (per sign-in, once per agent session, or off).
+// The way in is 1Password service accounts, one per 1Password account, each able to open one shared vault; their
+// tokens are stored locked to this Mac's Secure Enclave in Keychain items only Chrome Relay reads (opened without
+// a prompt), so they work in the background and while the person is away. Chrome Relay's own approval, naming
+// the agent, item and site, approves sign-ins (per sign-in, once per agent session, or off): Touch ID here, or
+// Face ID on a paired iPhone, whichever answers first.
 package vault
 
 import (
+	"cmp"
 	"context"
 	"crypto/hmac"
 	"crypto/sha1"
@@ -28,6 +29,8 @@ import (
 	"time"
 
 	op "github.com/1password/onepassword-sdk-go"
+
+	"github.com/aindeev/agent-chrome-relay/internal/phone"
 )
 
 // PasskeySection is the section of a Login item where Chrome Relay keeps a passkey it made.
@@ -46,18 +49,18 @@ type Store interface {
 	Put(ctx context.Context, item op.Item) (op.Item, error)
 }
 
-// Source: one way into 1Password and the vaults agents may use through it.
+// Source: a service account and the vault agents may use through it.
 type Source struct {
-	Account string   // a 1Password account in the desktop app, as shown in its sidebar; "" = the service account
-	Vaults  []string // service account: its one vault
+	Vaults []string // its one vault
+	Key    string   // its token's Keychain key (its 1Password account's UUID; "" = the older, single one)
+	Label  string   // its 1Password account, for people ("you@example.com")
 }
 
 // Settings: how agents reach 1Password ("onepassword" in config.json). Several accounts at once are fine; the
-// vault names agents may use must be unique across them (references name only the vault).
+// vault names agents may use must be unique across them (references name only the vault). How often Chrome
+// Relay asks is kept with each token, not here: config.json is a file agents could edit.
 type Settings struct {
 	Sources []Source
-	Approve string // Chrome Relay's own Touch ID: "sign-in", "session" or "off" ("" = session when every source is
-	// the desktop app, where 1Password itself already asks when the relay connects; else sign-in)
 }
 
 // Vaults agents may use, in configured order.
@@ -68,45 +71,33 @@ func (s Settings) Vaults() []string {
 	}
 	return out
 }
-func (s Settings) approve() string {
-	if s.Approve != "" {
-		return s.Approve
-	}
-	for _, src := range s.Sources {
-		if src.Account == "" {
-			return "sign-in"
-		}
-	}
-	return "session"
-}
-func (s Settings) service() bool {
-	return slices.ContainsFunc(s.Sources, func(src Source) bool { return src.Account == "" })
-}
-func (s Settings) key() string { return fmt.Sprintf("%q|%q", s.Sources, s.approve()) }
+func (s Settings) key() string { return fmt.Sprintf("%q", s.Sources) }
 
-// Person is who approves: Unlock opens the stored service account token (Touch ID), Approve is a plain Touch ID.
+// Person is who approves: Unlock opens the stored service account token (silently, but for one Touch ID for a
+// token an older Chrome Relay saved), Approve asks Touch ID here or Face ID on the paired iPhone.
 // A reason completes the sentence "chrome-relay is trying to ...".
 type Person interface {
-	Unlock(reason string) (token string, err error)
-	Approve(reason string) error
+	Unlock(key, reason string) (Token, error)
+	Approve(d phone.Details) error
 }
 
 // Vault is 1Password as agents see it, connected on first use.
 type Vault struct {
 	Settings func() Settings
-	Connect  func(ctx context.Context, account, token string) (Store, error) // an SDK client: desktop app account, or service account token
+	Connect  func(ctx context.Context, token string) (Store, error) // an SDK client for a service account token
 	Person   Person
 	Now      func() time.Time
 	Stamp    func() string // identifies the stored service account token: a new or removed one reconnects
 	CLI      string        // the command people run, for messages ("chrome-relay" or "chrome-relay-dev-mode")
 
-	mu        sync.Mutex
-	open_     bool
-	places    map[string]place // allowed vault name (lower case) -> where it is
-	opened    string           // settings and token stamp it was opened with
-	approvals map[string]time.Time
-	lists     map[string]listed // vault id -> its items, briefly
-	items     map[string]cached // item id -> item, briefly
+	mu           sync.Mutex
+	open_        bool
+	places       map[string]place // allowed vault name (lower case) -> where it is
+	opened       string           // settings and token stamp it was opened with
+	approvals    map[string]time.Time
+	tokenApprove string            // how often to ask, as stored with the service account token
+	lists        map[string]listed // vault id -> its items, briefly
+	items        map[string]cached // item id -> item, briefly
 }
 
 // place: an allowed vault, in the account that has it.
@@ -157,87 +148,104 @@ func quoted(names []string) string {
 	return strings.Join(q, ", ")
 }
 
-// open connects on first use, and again when the settings or the stored token change. With a service account,
-// unlocking its token is the first Touch ID, so reason says what it is for (and counts as that approval).
-func (v *Vault) open(ctx context.Context, reason string) (opened bool, err error) {
+// open connects on first use, and again when the settings or the stored token change. reason is for the one
+// Touch ID a service account token saved by an older Chrome Relay needs, before it is saved without.
+func (v *Vault) open(ctx context.Context, reason string) (err error) {
 	s := v.Settings()
 	stamp := s.key()
-	if v.Stamp != nil && s.service() {
+	if v.Stamp != nil {
 		stamp += "|" + v.Stamp()
 	}
 	if v.open_ && stamp == v.opened {
-		return false, nil
+		return nil
 	}
 	v.open_, v.places, v.approvals, v.lists, v.items = false, nil, nil, nil, nil // new settings or token, or none any more
 	if len(s.Vaults()) == 0 {
-		return false, v.notSetUp()
+		return v.notSetUp()
 	}
 	seen := map[string]bool{}
 	for _, n := range s.Vaults() {
 		if seen[strings.ToLower(n)] {
-			return false, fmt.Errorf("two allowed vaults are named %q: references name only the vault, so allow just one", n)
+			return fmt.Errorf("two allowed vaults are named %q: references name only the vault, so allow just one", n)
 		}
 		seen[strings.ToLower(n)] = true
 	}
 	places := map[string]place{}
+	v.tokenApprove = ""
 	for _, src := range s.Sources {
-		token := ""
-		if src.Account == "" {
-			if token, err = v.Person.Unlock(reason); err != nil {
-				return false, err
-			}
+		t, err := v.Person.Unlock(src.Key, reason)
+		if err != nil {
+			return err
 		}
-		v.mu.Unlock() // the desktop app may be waiting on the person
-		store, err := v.Connect(ctx, src.Account, token)
+		if strictness[t.Approve] >= strictness[v.tokenApprove] { // several service accounts: the strictest setting
+			v.tokenApprove = t.Approve
+		}
+		v.mu.Unlock() // 1Password's servers take a moment
+		store, err := v.Connect(ctx, t.Value)
 		var vaults []op.VaultOverview
 		if err == nil {
 			vaults, err = store.Vaults(ctx)
 		}
 		v.mu.Lock()
 		where := "the service account"
-		if src.Account != "" {
-			where = fmt.Sprintf("1Password account %q", src.Account)
+		if src.Label != "" {
+			where += " in " + src.Label
 		}
 		if err != nil {
-			return false, fmt.Errorf("could not reach %s: %w", where, err)
+			return fmt.Errorf("could not reach %s: %w", where, err)
 		}
 		for _, want := range src.Vaults {
 			i := slices.IndexFunc(vaults, func(x op.VaultOverview) bool { return strings.EqualFold(x.Title, want) })
 			if i < 0 {
-				return false, fmt.Errorf("%s has no vault %q that Chrome Relay can open", where, want)
+				return fmt.Errorf("%s has no vault %q that Chrome Relay can open", where, want)
 			}
-			places[strings.ToLower(want)] = place{store, vaults[i].ID, vaults[i].Title, src.Account}
+			places[strings.ToLower(want)] = place{store, vaults[i].ID, vaults[i].Title, src.Label}
 		}
 	}
 	v.open_, v.places, v.opened = true, places, stamp
-	return s.service() && len(s.Sources) == 1, nil
+	return nil
 }
 
-// approve asks the person, per the settings: once per sign-in (that agent, item and site, for a minute: username,
-// password, one-time code), once per agent session, or not at all.
-func (v *Vault) approve(who Who, item, host, reason string, justUnlocked bool) error {
-	s := v.Settings()
+var strictness = map[string]int{"": -1, "off": 0, "session": 1, "sign-in": 2}
+
+// signInWindow: how long one approval lets an agent use an item (any of its fields, on any of its websites).
+const signInWindow = 2 * time.Minute
+
+// approve asks the person, per the settings: once per sign-in (that agent and item: its username, password and
+// one-time code, on any of the item's websites, for two minutes), once per agent session, or not at all.
+func (v *Vault) approve(who Who, it op.Item, host, what, reason string) error {
 	if v.approvals == nil {
 		v.approvals = map[string]time.Time{}
 	}
-	key, ttl := who.Session+"|"+item+"|"+host, time.Minute
-	switch s.approve() {
-	case "off":
+	mode := cmp.Or(v.tokenApprove, "sign-in") // kept with the tokens, not in config.json (which agents could edit)
+	if mode == "off" {
 		return nil
-	case "session":
-		key, ttl = who.Session, 12*time.Hour
-		reason = fmt.Sprintf("let %s sign in with logins from your 1Password vaults %s for the rest of its session, starting with: %s",
-			who.Name, quoted(s.Vaults()), strings.TrimPrefix(reason, "let "+who.Name+" "))
 	}
-	if !justUnlocked && v.approvals[key].Before(v.now()) {
+	key, ttl := who.Session+"|"+it.ID, signInWindow
+	if mode == "session" {
+		key, ttl, what = who.Session, 12*time.Hour, "sign-ins this session, starting with "+what
+		reason = fmt.Sprintf("let %s sign in with logins from your 1Password vaults %s for the rest of its session, starting with: %s",
+			who.Name, quoted(v.Settings().Vaults()), strings.TrimPrefix(reason, "let "+who.Name+" "))
+	} else { // one approval for the whole sign-in: the person sees the site, the account and the item, once
+		as := ""
+		if n := PickField(it, "username", false); n != nil && n.Value != "" {
+			as = " as " + n.Value
+		}
+		what = "sign-in" + as
+		reason = fmt.Sprintf("let %s sign in to %s%s with %q from 1Password (username, password and one-time code, for %d minutes)",
+			who.Name, host, as, it.Title, int(signInWindow/time.Minute))
+	}
+	if !v.approvals[key].After(v.now()) {
 		v.mu.Unlock()
-		err := v.Person.Approve(reason)
+		err := v.Person.Approve(phone.Details{Reason: reason, Agent: who.Name, Site: host, What: what})
 		v.mu.Lock()
 		if err != nil {
 			return err
 		}
+		v.approvals[key] = v.now().Add(ttl) // from the approval: using the item doesn't extend it
+	} else if mode == "session" {
+		v.approvals[key] = v.now().Add(ttl)
 	}
-	v.approvals[key] = v.now().Add(ttl)
 	return nil
 }
 
@@ -269,13 +277,31 @@ func (v *Vault) item(ctx context.Context, p place, nameOrID string) (op.Item, er
 			id = o.ID
 		}
 	}
-	for _, o := range list {
-		if id == "" && strings.EqualFold(o.Title, nameOrID) {
-			id = o.ID
-		}
-	}
 	if id == "" {
-		return op.Item{}, fmt.Errorf("there is no item %q in the vault %q", nameOrID, p.name)
+		var same []op.ItemOverview
+		for _, o := range list {
+			if strings.EqualFold(o.Title, nameOrID) {
+				same = append(same, o)
+			}
+		}
+		switch len(same) {
+		case 0:
+			return op.Item{}, fmt.Errorf("there is no item %q in the vault %q", nameOrID, p.name)
+		case 1:
+			id = same[0].ID
+		default: // never guess which account: the wrong one's password would be typed
+			var which []string
+			for _, o := range same {
+				who := "(no username)"
+				if it, err := v.item(ctx, p, o.ID); err == nil {
+					if f := PickField(it, "username", false); f != nil && f.Value != "" {
+						who = f.Value
+					}
+				}
+				which = append(which, fmt.Sprintf("%s -> op://%s/%s/<field>", who, p.name, o.ID))
+			}
+			return op.Item{}, fmt.Errorf("%d items are titled %q in the vault %q. Use the one for the account you are signing in as, by its id in place of the title: %s", len(same), nameOrID, p.name, strings.Join(which, "; "))
+		}
 	}
 	if c, ok := v.items[p.account+"/"+id]; ok && v.now().Sub(c.at) < 30*time.Second {
 		return c.item, nil
@@ -334,8 +360,7 @@ func (v *Vault) Resolve(ctx context.Context, ref, pageURL string, who Who) (Valu
 
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	unlocked, err := v.open(ctx, reason)
-	if err != nil {
+	if err := v.open(ctx, reason); err != nil {
 		return Value{}, err
 	}
 	it, err := v.item(ctx, v.places[strings.ToLower(vaultName)], itemName)
@@ -352,7 +377,14 @@ func (v *Vault) Resolve(ctx context.Context, ref, pageURL string, who Who) (Valu
 	if f == nil {
 		return Value{}, fmt.Errorf("%q has no field %q", it.Title, fieldName)
 	}
-	if err := v.approve(who, it.ID, u.Hostname(), reason, unlocked); err != nil {
+	if !strings.EqualFold(itemName, it.Title) { // referred to by id: the person is asked by title and account, never an id
+		label := fmt.Sprintf("%q", it.Title)
+		if n := PickField(it, "username", false); n != nil && n.Value != "" {
+			label += " (" + n.Value + ")"
+		}
+		reason = fmt.Sprintf("let %s fill the %s of %s on %s", who.Name, what, label, u.Hostname())
+	}
+	if err := v.approve(who, it, u.Hostname(), what, reason); err != nil {
 		return Value{}, err
 	}
 	switch f.FieldType {

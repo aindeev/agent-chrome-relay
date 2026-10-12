@@ -76,6 +76,14 @@ func (c *cli) doctor() error {
 	default:
 		check(true, fmt.Sprintf("signed by %s, with the hardened runtime", sig.Authority), "")
 	}
+	// how the person hears that an agent needs them
+	if c.installedNotifier() == "" {
+		c.printf("  --   no Chrome Relay.app, so no notifications when an agent needs you (optional: ./build with Xcode's command line tools, then `%s update`)\n", c.Name)
+	} else {
+		st := c.notifierStatus()
+		check(st == "authorized", "notifications allowed for Chrome Relay (a Focus hides them unless you let Chrome Relay through)",
+			fmt.Sprintf("Chrome Relay's notifications are %s: run `%s notify test` and allow them (System Settings > Notifications > Chrome Relay)", cmpOr(st, "unknown"), c.Name))
+	}
 	sources := configuredSources(c.config())
 	switch {
 	case !macos.Linked && len(sources) > 0:
@@ -85,27 +93,15 @@ func (c *cli) doctor() error {
 	case len(sources) == 0:
 		c.printf("  --   1Password: not set up (optional: `%s vault setup` lets agents sign in with your 1Password)\n", c.Name)
 	}
-	desktop := false
 	for _, s := range sources {
-		if s.Account == "" {
-			check(vault.HasToken(c.vaultInstance()), fmt.Sprintf("1Password service account for %s: token in the Keychain (locked to this Mac)", quoteList(s.Vaults)),
-				fmt.Sprintf("no 1Password service account token in the Keychain: run `%s vault setup %s`", c.Name, s.Vaults[0]))
-			continue
-		}
-		desktop = true
-		check(true, fmt.Sprintf("1Password account %s: vaults %s", s.label(), strings.Join(s.Vaults, ", ")), "")
+		check(vault.HasToken(c.vaultInstance(), s.Key), fmt.Sprintf("1Password %s: vault %s, token in the Keychain (locked to this Mac)", s.label(), quoteList(s.Vaults)),
+			fmt.Sprintf("no token in the Keychain for the %s: run `%s vault setup %q`", s.label(), c.Name, s.Vaults[0]))
 	}
-	if desktop { // the relay goes through the 1Password app, and a library it ships
-		app := onePasswordApp(c.UserHome)
-		check(app != "", "1Password app at "+app, "1Password app not found in /Applications: install it from 1password.com/downloads")
-		if app != "" {
-			_, err := os.Stat(filepath.Join(app, "Contents", "Frameworks", "libop_sdk_ipc_client.dylib"))
-			check(err == nil, "1Password app lets other apps connect (Settings > Developer > \"Integrate with other apps\" must be on)",
-				"this 1Password app can't connect other apps: update 1Password, and turn on Settings > Developer > \"Integrate with other apps\"")
-		}
+	if n := appAccounts(c.config()); n > 0 {
+		check(false, "", fmt.Sprintf("config.json still has %d 1Password app connection(s) from an earlier setup, which Chrome Relay no longer uses (they can't work in the background): run `%s vault setup` for service accounts", n, c.Name))
 	}
 	if len(sources) > 0 && c.up() {
-		c.println("  ..   asking the relay for the vaults (approve in 1Password or with Touch ID if asked)")
+		c.println("  ..   asking the relay for the vaults")
 		var d vaultSummary
 		if err := c.get("/vault", vaultTimeout, &d); err != nil {
 			d.Error = err.Error()
@@ -122,16 +118,6 @@ func (c *cli) doctor() error {
 		c.println("fix the items above")
 	}
 	return nil
-}
-
-// onePasswordApp: where the 1Password app is installed, or "".
-func onePasswordApp(userHome string) string {
-	for _, p := range []string{"/Applications/1Password.app", filepath.Join(userHome, "Applications", "1Password.app")} {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
 }
 
 func asList(v any) []any {

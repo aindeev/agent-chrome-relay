@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/aindeev/agent-chrome-relay/internal/phone"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +40,7 @@ func (s *fakeStore) Get(_ context.Context, _, id string) (op.Item, error) {
 	return op.Item{}, errors.New("no such item")
 }
 func (s *fakeStore) Create(_ context.Context, p op.ItemCreateParams) (op.Item, error) {
-	it := op.Item{ID: fmt.Sprintf("new%d", len(s.items)), Title: p.Title, Category: p.Category, Fields: p.Fields, Sections: p.Sections, Websites: p.Websites}
+	it := op.Item{ID: fmt.Sprintf("new%d", len(s.items)), Title: p.Title, Category: p.Category, Fields: p.Fields, Sections: p.Sections, Websites: p.Websites, Tags: p.Tags}
 	s.items = append(s.items, it)
 	return it, nil
 }
@@ -52,18 +54,20 @@ func (s *fakeStore) Put(_ context.Context, it op.Item) (op.Item, error) {
 }
 
 type fakePerson struct {
-	prompts []string
-	decline bool
+	tokenApprove string // stored with the token: how often to ask
+	prompts      []string
+	decline      bool
 }
 
-func (p *fakePerson) Unlock(reason string) (string, error) {
+func (p *fakePerson) Unlock(key, reason string) (Token, error) {
 	p.prompts = append(p.prompts, "unlock: "+reason)
 	if p.decline {
-		return "", errors.New("the person did not approve with Touch ID")
+		return Token{}, errors.New("the person did not approve with Touch ID")
 	}
-	return "ops_test", nil
+	return Token{Value: "ops_test" + key, Approve: p.tokenApprove}, nil
 }
-func (p *fakePerson) Approve(reason string) error {
+func (p *fakePerson) Approve(d phone.Details) error {
+	reason := d.Reason
 	p.prompts = append(p.prompts, "approve: "+reason)
 	if p.decline {
 		return errors.New("the person did not approve with Touch ID")
@@ -83,7 +87,7 @@ func fixture() (*Vault, *fakeStore, *fakePerson, *time.Time) {
 	person := &fakePerson{}
 	now := time.Unix(1_800_000_010, 0)
 	v := &Vault{Settings: func() Settings { return Settings{Sources: []Source{{Vaults: []string{"Shared with Chrome Relay"}}}} },
-		Person: person, Now: func() time.Time { return now }, Connect: func(context.Context, string, string) (Store, error) { return store, nil }}
+		Person: person, Now: func() time.Time { return now }, Connect: func(context.Context, string) (Store, error) { return store, nil }}
 	return v, store, person, &now
 }
 
@@ -134,8 +138,9 @@ func TestResolveFillsOnlyTheItemsSiteAndAsksOncePerSignIn(t *testing.T) {
 	if err != nil || got.Value != "hunter2-secret" || got.Kind != "secret" {
 		t.Fatalf("password: %+v %v (the item's built-in password, not a leftover web-form field)", got, err)
 	}
-	if len(person.prompts) != 1 || person.prompts[0] != `unlock: let Claude Code (my-repo) fill the password of "GitHub" on github.com` {
-		t.Fatalf("first use opens the vault with the request as the reason: %q", person.prompts)
+	if len(person.prompts) != 2 || person.prompts[0] != `unlock: let Claude Code (my-repo) fill the password of "GitHub" on github.com` ||
+		person.prompts[1] != `approve: let Claude Code (my-repo) sign in to github.com as agent-bot with "GitHub" from 1Password (username, password and one-time code, for 2 minutes)` {
+		t.Fatalf("first use opens the token (silently, unless an old one) and asks for the sign-in: %q", person.prompts)
 	}
 	if got, _ := v.Resolve(ctx, "op://shared with chrome relay/github/username", "https://github.com/login", claude); got.Value != "agent-bot" {
 		t.Fatal("username", got)
@@ -144,12 +149,16 @@ func TestResolveFillsOnlyTheItemsSiteAndAsksOncePerSignIn(t *testing.T) {
 	if want, _, _ := TOTP("JBSWY3DPEHPK3PXP", *now); err != nil || otp.Value != want || otp.Kind != "otp" {
 		t.Fatalf("otp %+v %v", otp, err)
 	}
-	if len(person.prompts) != 1 {
-		t.Fatalf("one sign-in, one Touch ID: %q", person.prompts)
+	*now = now.Add(90 * time.Second)
+	if got, err := v.Resolve(ctx, "op://Shared with Chrome Relay/GitHub/password", "https://www.github.com/sessions/verify", claude); err != nil || got.Value != "hunter2-secret" {
+		t.Fatal("another of the item's hosts, same sign-in:", got, err)
 	}
-	*now = now.Add(2 * time.Minute)
+	if len(person.prompts) != 2 {
+		t.Fatalf("one sign-in, one approval, for every field and host of the item: %q", person.prompts)
+	}
+	*now = now.Add(31 * time.Second) // two minutes since the approval, however often it was used
 	v.Resolve(ctx, "op://Shared with Chrome Relay/GitHub/password", "https://github.com/login", claude)
-	if len(person.prompts) != 2 || !strings.HasPrefix(person.prompts[1], "approve: let Claude Code (my-repo) fill the password") {
+	if len(person.prompts) != 3 || !strings.HasPrefix(person.prompts[2], "approve: let Claude Code (my-repo) sign in to github.com") {
 		t.Fatalf("a later sign-in asks again: %q", person.prompts)
 	}
 	for ref, page := range map[string]string{
@@ -186,17 +195,30 @@ func TestSummaryHasNoSecretsAndPasskeysAreStored(t *testing.T) {
 	pk := func(rp, user string) passkeys.Passkey {
 		return passkeys.Passkey{RPID: rp, CredentialID: "cred-" + rp, UserHandle: "AQID", UserName: user, PublicKey: "PUB", KeyHandle: "CHIP-" + rp}
 	}
-	if title, _ := v.SavePasskey(ctx, pk("github.com", "agent-bot"), ""); title != "GitHub" {
-		t.Fatal("same site and username: added to that item, got", title)
+	before := fmt.Sprint(store.items[0])
+	if title, _ := v.SavePasskey(ctx, pk("github.com", "agent-bot"), "GitHub"); title != "GitHub passkey (agent-bot) · Chrome Relay" {
+		t.Fatal("an item of its own, got", title)
 	}
-	if title, _ := v.SavePasskey(ctx, pk("webauthn.example", "bot"), "Demo"); title != "Demo (bot)" {
-		t.Fatal("else a new Login item, got", title)
+	if fmt.Sprint(store.items[0]) != before || PasskeyOf(store.items[0]) != nil {
+		t.Fatal("the person's own item is never changed")
 	}
-	if store.items[0].Fields[1].Value != "hunter2-secret" || PasskeyOf(store.items[0]).RPID != "github.com" {
-		t.Fatal("the item keeps its fields and gains the passkey")
+	if title, _ := v.SavePasskey(ctx, pk("webauthn.example", "bot"), "Demo"); title != "Demo passkey (bot) · Chrome Relay" {
+		t.Fatal("named for the site and account, got", title)
 	}
+	n := len(store.items)
+	again := pk("webauthn.example", "bot")
+	again.CredentialID, again.KeyHandle = "cred-2", "CHIP-2"
+	if title, _ := v.SavePasskey(ctx, again, "Demo"); title != "Demo passkey (bot) · Chrome Relay" || len(store.items) != n {
+		t.Fatal("a second passkey for that site and account replaces the first, in Chrome Relay's own item:", title, len(store.items))
+	}
+	if gh, _ := v.Passkeys(ctx, "github.com", claude); len(gh) != 1 || gh[0].Item != "GitHub passkey (agent-bot) · Chrome Relay" {
+		t.Fatalf("%+v", gh)
+	}
+	twice := store.items[len(store.items)-1] // the same passkey recorded in two items is one passkey
+	twice.ID, twice.Tags = "copy", nil
+	store.items = append(store.items, twice)
 	found, _ := v.Passkeys(ctx, "webauthn.example", claude)
-	if len(found) != 1 || found[0].KeyHandle != "CHIP-webauthn.example" || found[0].Device == "" {
+	if len(found) != 1 || found[0].KeyHandle != "CHIP-2" || found[0].CredentialID != "cred-2" || found[0].Device == "" {
 		t.Fatalf("%+v", found)
 	}
 	for _, it := range store.items {
@@ -219,13 +241,13 @@ func TestANewTokenReconnectsAndNoneStopsFilling(t *testing.T) {
 	ref, page := "op://Shared with Chrome Relay/GitHub/username", "https://github.com/login"
 	v.Resolve(ctx, ref, page, claude)
 	v.Resolve(ctx, ref, page, claude)
-	if len(person.prompts) != 1 {
-		t.Fatal("same token: opened once", person.prompts)
+	if len(person.prompts) != 2 {
+		t.Fatal("same token: opened once, one approval", person.prompts)
 	}
 	stamp = "token-2" // `vault setup` stored a new token
 	v.Resolve(ctx, ref, page, claude)
-	if len(person.prompts) != 2 || !strings.HasPrefix(person.prompts[1], "unlock:") {
-		t.Fatal("a new token is opened again (Touch ID)", person.prompts)
+	if len(person.prompts) != 4 || !strings.HasPrefix(person.prompts[2], "unlock:") || !strings.HasPrefix(person.prompts[3], "approve:") {
+		t.Fatal("a new token is opened again, and its sign-ins approved again", person.prompts)
 	}
 	v.Settings = func() Settings { return Settings{} } // `vault forget`
 	if _, err := v.Resolve(ctx, ref, page, claude); err == nil || !strings.Contains(err.Error(), "vault setup") {
@@ -233,57 +255,128 @@ func TestANewTokenReconnectsAndNoneStopsFilling(t *testing.T) {
 	}
 }
 
-func TestDesktopAppTwoAccountsOneApprovalPerAgentSession(t *testing.T) {
-	personal := &fakeStore{vault: "Private", items: []op.Item{{ID: "tw1", Title: "Twilio (Sam - Acme)", Category: op.ItemCategoryLogin,
+func TestTwoServiceAccountsOneApprovalPerAgentSession(t *testing.T) {
+	personal := &fakeStore{vault: "Shared (personal)", items: []op.Item{{ID: "tw1", Title: "Twilio (Sam - Acme)", Category: op.ItemCategoryLogin,
 		Websites: []op.Website{{URL: "https://www.twilio.com"}}, Fields: []op.ItemField{
 			{ID: "username", Title: "username", FieldType: op.ItemFieldTypeText, Value: "sam@acme.com"},
 			{ID: "password", Title: "password", FieldType: op.ItemFieldTypeConcealed, Value: "twilio-secret"}}}}}
-	work := &fakeStore{vault: "Employee", items: []op.Item{{ID: "gh2", Title: "GitHub", Category: op.ItemCategoryLogin,
+	work := &fakeStore{vault: "Shared (acme)", items: []op.Item{{ID: "gh2", Title: "GitHub", Category: op.ItemCategoryLogin,
 		Websites: []op.Website{{URL: "https://github.com"}}, Fields: []op.ItemField{{ID: "password", FieldType: op.ItemFieldTypeConcealed, Value: "work-secret"}}}}}
-	person := &fakePerson{}
+	person := &fakePerson{tokenApprove: "session"}
 	var connected []string
 	v := &Vault{Person: person,
 		Settings: func() Settings {
-			return Settings{Sources: []Source{{Account: "Home", Vaults: []string{"Private"}}, {Account: "Acme", Vaults: []string{"Employee"}}}}
+			return Settings{Sources: []Source{{Key: "HOME", Label: "sam@example.com", Vaults: []string{"Shared (personal)"}}, {Key: "WORK", Label: "sam@acme.com", Vaults: []string{"Shared (acme)"}}}}
 		},
-		Connect: func(_ context.Context, account, token string) (Store, error) {
-			connected = append(connected, account+"|"+token)
-			if account == "Acme" {
+		Connect: func(_ context.Context, token string) (Store, error) {
+			connected = append(connected, token)
+			if token == "ops_testWORK" {
 				return work, nil
 			}
 			return personal, nil
 		}}
 	ctx := context.Background()
-	got, err := v.Resolve(ctx, "op://Private/Twilio (Sam - Acme)/password", "https://www.twilio.com/login", claude)
+	got, err := v.Resolve(ctx, "op://Shared (personal)/Twilio (Sam - Acme)/password", "https://www.twilio.com/login", claude)
 	if err != nil || got.Value != "twilio-secret" {
 		t.Fatal(got, err)
 	}
-	if fmt.Sprint(connected) != "[Home| Acme|]" {
-		t.Fatal("both accounts through the desktop app, no token:", connected)
+	if fmt.Sprint(connected) != "[ops_testHOME ops_testWORK]" {
+		t.Fatal("each account through its own service account token:", connected)
 	}
-	if got, err := v.Resolve(ctx, "op://Employee/GitHub/password", "https://github.com/login", claude); err != nil || got.Value != "work-secret" {
+	if got, err := v.Resolve(ctx, "op://Shared (acme)/GitHub/password", "https://github.com/login", claude); err != nil || got.Value != "work-secret" {
 		t.Fatal("the other account's vault:", got, err)
 	}
-	if len(person.prompts) != 1 || !strings.Contains(person.prompts[0], `vaults "Private", "Employee" for the rest of its session`) || strings.HasPrefix(person.prompts[0], "unlock") {
-		t.Fatal("one Chrome Relay approval per agent session, naming the vaults; nothing to unlock:", person.prompts)
+	approvals := func() (n int) {
+		for _, p := range person.prompts {
+			if strings.HasPrefix(p, "approve:") {
+				n++
+			}
+		}
+		return
+	}
+	if approvals() != 1 || !strings.Contains(fmt.Sprint(person.prompts), `vaults "Shared (personal)", "Shared (acme)" for the rest of its session`) {
+		t.Fatal("one Chrome Relay approval per agent session (as stored with the tokens), naming the vaults:", person.prompts)
 	}
 	other := Who{Name: "Codex (x)", Session: "s9"}
-	v.Resolve(ctx, "op://Private/Twilio (Sam - Acme)/username", "https://www.twilio.com/login", other)
-	if len(person.prompts) != 2 {
+	v.Resolve(ctx, "op://Shared (personal)/Twilio (Sam - Acme)/username", "https://www.twilio.com/login", other)
+	if approvals() != 2 {
 		t.Fatal("another agent asks again", person.prompts)
 	}
-	if _, err := v.Resolve(ctx, "op://Shared/Anything/password", "https://www.twilio.com/", claude); err == nil || !strings.Contains(err.Error(), `only the vaults "Private", "Employee"`) {
+	if _, err := v.Resolve(ctx, "op://Private/Anything/password", "https://www.twilio.com/", claude); err == nil || !strings.Contains(err.Error(), `only the vaults "Shared (personal)", "Shared (acme)"`) {
 		t.Fatal("vaults not allowed are refused:", err)
 	}
 	sum, _ := v.Summarize(ctx, claude)
-	if len(sum.Items) != 2 || sum.Items[0].Vault != "Private" || sum.Items[0].Account != "Home" || sum.Items[1].Account != "Acme" {
+	if len(sum.Items) != 2 || sum.Items[0].Account != "sam@example.com" || sum.Items[1].Account != "sam@acme.com" {
 		t.Fatalf("listing says where each login is: %+v", sum.Items)
 	}
-	clash := &Vault{Person: person, Connect: func(context.Context, string, string) (Store, error) { return personal, nil },
+	clash := &Vault{Person: person, Connect: func(context.Context, string) (Store, error) { return personal, nil },
 		Settings: func() Settings {
-			return Settings{Sources: []Source{{Account: "A", Vaults: []string{"Private"}}, {Account: "B", Vaults: []string{"private"}}}}
+			return Settings{Sources: []Source{{Key: "A", Vaults: []string{"Shared"}}, {Key: "B", Vaults: []string{"shared"}}}}
 		}}
-	if _, err := clash.Resolve(ctx, "op://Private/Twilio (Sam - Acme)/password", "https://www.twilio.com/", claude); err == nil || !strings.Contains(err.Error(), "two allowed vaults") {
+	if _, err := clash.Resolve(ctx, "op://Shared/Twilio (Sam - Acme)/password", "https://www.twilio.com/", claude); err == nil || !strings.Contains(err.Error(), "two allowed vaults") {
 		t.Fatal("ambiguous vault names are refused:", err)
+	}
+}
+
+// With a service account, how often Chrome Relay asks is what's stored with the token: config.json, which an
+// agent could edit, can't switch the approvals off.
+func TestServiceAccountApprovalsComeWithTheToken(t *testing.T) {
+	v, _, person, _ := fixture()
+	// config.json has no say: an agent writing "approve": "off" there changes nothing
+	ctx := context.Background()
+	v.Resolve(ctx, "op://Shared with Chrome Relay/GitHub/password", "https://github.com/login", claude)
+	if !strings.HasPrefix(fmt.Sprint(person.prompts), "[unlock:") || len(person.prompts) != 2 {
+		t.Fatal("config's off is ignored: the token's setting (sign-in) still asks", person.prompts)
+	}
+	v2, _, person2, _ := fixture()
+	person2.tokenApprove = "off" // the person chose it (`chrome-relay vault approve off`, after approving)
+	v2.Resolve(ctx, "op://Shared with Chrome Relay/GitHub/password", "https://github.com/login", claude)
+	if len(person2.prompts) != 1 {
+		t.Fatal("off, as stored with the token: no approval", person2.prompts)
+	}
+}
+
+func TestTwoItemsWithOneTitleAreNeverGuessed(t *testing.T) {
+	v, store, person, _ := fixture()
+	for _, u := range []string{"work@example.com", "me@example.com"} {
+		store.items = append(store.items, op.Item{ID: "g-" + u[:2], Title: "Google", Category: op.ItemCategoryLogin, Websites: []op.Website{{URL: "https://accounts.google.com"}},
+			Fields: []op.ItemField{{ID: "username", Title: "username", FieldType: op.ItemFieldTypeText, Value: u}, {ID: "password", FieldType: op.ItemFieldTypeConcealed, Value: "pw-" + u}}})
+	}
+	ctx := context.Background()
+	_, err := v.Resolve(ctx, "op://Shared with Chrome Relay/Google/password", "https://accounts.google.com/signin", claude)
+	if err == nil || !strings.Contains(err.Error(), `2 items are titled "Google"`) || !strings.Contains(err.Error(), "me@example.com -> op://Shared with Chrome Relay/g-me/<field>") {
+		t.Fatalf("a shared title must be refused, naming each item's id: %v", err)
+	}
+	if got, err := v.Resolve(ctx, "op://Shared with Chrome Relay/g-me/password", "https://accounts.google.com/signin", claude); err != nil || got.Value != "pw-me@example.com" {
+		t.Fatalf("by id: %+v %v", got, err)
+	}
+	if last := person.prompts[len(person.prompts)-1]; last != `approve: let Claude Code (my-repo) sign in to accounts.google.com as me@example.com with "Google" from 1Password (username, password and one-time code, for 2 minutes)` {
+		t.Fatalf("the person is asked by title and account, not by id: %q", last)
+	}
+}
+
+func TestAPasskeyGoesWhereItsAccountsLoginIs(t *testing.T) {
+	personal := &fakeStore{vault: "Shared (personal)"}
+	work := &fakeStore{vault: "Shared (acme)", items: []op.Item{{ID: "gh2", Title: "GitHub", Category: op.ItemCategoryLogin,
+		Websites: []op.Website{{URL: "https://github.com"}}, Fields: []op.ItemField{{ID: "username", Title: "username", FieldType: op.ItemFieldTypeText, Value: "sam-acme"}}}}}
+	v := &Vault{Person: &fakePerson{},
+		Settings: func() Settings {
+			return Settings{Sources: []Source{{Key: "HOME", Label: "sam@example.com", Vaults: []string{"Shared (personal)"}}, {Key: "WORK", Label: "sam@acme.com", Vaults: []string{"Shared (acme)"}}}}
+		},
+		Connect: func(_ context.Context, token string) (Store, error) {
+			if token == "ops_testWORK" {
+				return work, nil
+			}
+			return personal, nil
+		}}
+	ctx := context.Background()
+	if _, err := v.Summarize(ctx, claude); err != nil { // opens the vaults
+		t.Fatal(err)
+	}
+	if _, err := v.SavePasskey(ctx, passkeys.Passkey{RPID: "github.com", CredentialID: "c", UserName: "sam-acme", KeyHandle: "k"}, "GitHub"); err != nil {
+		t.Fatal(err)
+	}
+	if len(personal.items) != 0 || len(work.items) != 2 || !slices.Contains(work.items[1].Tags, PasskeyTag) {
+		t.Fatalf("into the work vault, beside sam-acme's login: personal %d, work %d", len(personal.items), len(work.items))
 	}
 }

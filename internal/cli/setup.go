@@ -125,6 +125,9 @@ func (c *cli) setup() error {
 	if err := c.saveConfig(cfg); err != nil {
 		return err
 	}
+	if err := c.installNotifier(); err != nil {
+		return err
+	}
 	tokPath := filepath.Join(c.Home, "token")
 	if _, err := os.Stat(tokPath); errors.Is(err, fs.ErrNotExist) {
 		secret := make([]byte, 32)
@@ -223,7 +226,9 @@ Last step, by hand, in EACH Chrome profile agents should use (nothing installs i
   1. open chrome://extensions in a window of that profile
   2. turn on Developer mode (top right)
   3. Load unpacked -> %s
-Then run `+"`%s doctor`"+".\n", c.Ext, c.Name)
+  4. pin it: the puzzle-piece icon in Chrome's toolbar, then the pin next to Chrome Relay (its badge shows when
+     an agent needs you)
+Then run `+"`%s doctor`, and `%s notify test` to allow Chrome Relay's notifications"+".\n", c.Ext, c.Name, c.Name)
 	return nil
 }
 
@@ -253,8 +258,11 @@ func (c *cli) uninstall() error {
 			}
 		}
 	}
+	if !c.Dev {
+		os.RemoveAll(c.notifierApp())
+	}
 	c.printf("removed the service, CLI link and skill; %s kept. Remove the extension from chrome://extensions in each profile.\n", c.Home)
-	if vault.HasToken(c.vaultInstance()) {
+	if slices.ContainsFunc(append(serviceKeys(configuredSources(c.config())), ""), func(k string) bool { return vault.HasToken(c.vaultInstance(), k) }) {
 		c.printf("The 1Password token is still in your Keychain: `%s vault forget` removes it.\n", c.Name)
 	}
 	return nil

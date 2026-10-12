@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	op "github.com/1password/onepassword-sdk-go"
@@ -19,7 +20,8 @@ type Summary struct {
 }
 type ItemSummary struct {
 	Vault    string   `json:"vault"`
-	Account  string   `json:"account,omitempty"` // the 1Password account it's in (desktop app)
+	Account  string   `json:"account,omitempty"` // the 1Password account it's in
+	ID       string   `json:"id"`                // for references when two items share a title
 	Title    string   `json:"title"`
 	Websites []string `json:"websites"`
 	Username string   `json:"username"`
@@ -28,12 +30,12 @@ type ItemSummary struct {
 	Passkey  string   `json:"passkey"` // its relying party, if Chrome Relay made one
 }
 
-// Summarize lists the vault for an agent, never values. Opening the vault takes Touch ID like anything else.
+// Summarize lists the vault for an agent, never values.
 func (v *Vault) Summarize(ctx context.Context, who Who) (Summary, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	names := v.Settings().Vaults()
-	if _, err := v.open(ctx, fmt.Sprintf("show %s which logins are in your 1Password vaults %s (titles and websites, no secrets)", who.Name, quoted(names))); err != nil {
+	if err := v.open(ctx, fmt.Sprintf("show %s which logins are in your 1Password vaults %s (titles and websites, no secrets)", who.Name, quoted(names))); err != nil {
 		return Summary{}, err
 	}
 	out := Summary{Vault: strings.Join(names, ", "), Vaults: names, Items: []ItemSummary{}}
@@ -57,7 +59,7 @@ func (v *Vault) summarize(ctx context.Context, p place, o op.ItemOverview) (Item
 		if err != nil {
 			return ItemSummary{}, false
 		}
-		s := ItemSummary{Vault: p.name, Account: p.account, Title: it.Title, Websites: websites(it)}
+		s := ItemSummary{Vault: p.name, Account: p.account, ID: it.ID, Title: it.Title, Websites: websites(it)}
 		if f := PickField(it, "username", false); f != nil {
 			s.Username = f.Value
 		}
@@ -113,11 +115,11 @@ func related(urls []string, rpID string) bool {
 	return false
 }
 
-// Passkeys for a relying party. Reading them needs no approval of its own: signing with one does (Touch ID).
+// Passkeys for a relying party. Reading them needs no approval of its own: signing with one does.
 func (v *Vault) Passkeys(ctx context.Context, rpID string, who Who) ([]passkeys.Passkey, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if _, err := v.open(ctx, fmt.Sprintf("let %s use a passkey for %s from your 1Password vaults %s", who.Name, rpID, quoted(v.Settings().Vaults()))); err != nil {
+	if err := v.open(ctx, fmt.Sprintf("let %s use a passkey for %s from your 1Password vaults %s", who.Name, rpID, quoted(v.Settings().Vaults()))); err != nil {
 		return nil, err
 	}
 	var out []passkeys.Passkey
@@ -131,7 +133,9 @@ func (v *Vault) Passkeys(ctx context.Context, rpID string, who Who) ([]passkeys.
 				continue
 			}
 			if it, err := v.item(ctx, p, o.ID); err == nil {
-				if pk := PasskeyOf(it); pk != nil && pk.RPID == rpID {
+				// the same passkey recorded twice (an older Chrome Relay kept it in the person's item, and a copy
+				// moved it to an item of its own) is one passkey
+				if pk := PasskeyOf(it); pk != nil && pk.RPID == rpID && !slices.ContainsFunc(out, func(x passkeys.Passkey) bool { return x.CredentialID == pk.CredentialID }) {
 					out = append(out, *pk)
 				}
 			}
@@ -140,7 +144,14 @@ func (v *Vault) Passkeys(ctx context.Context, rpID string, who Who) ([]passkeys.
 	return out, nil
 }
 
-// SavePasskey stores a new passkey: on the site's existing Login item for that username, or a new Login item.
+// PasskeyTag marks the items Chrome Relay made for its passkeys: the only items it ever changes.
+const PasskeyTag = "chrome-relay-passkey"
+
+// SavePasskey stores a new passkey in an item of its own, never in the person's items, which Chrome Relay doesn't
+// change (rewriting an item through the SDK can lose what the SDK doesn't know, like 1Password's own passkeys).
+// It goes into the vault that holds the site's login for that username, so a work account's passkey stays in the
+// work account; else the first vault. A passkey Chrome Relay already keeps for that site and username (one the
+// site refused, or an older one) is replaced, in its own item.
 func (v *Vault) SavePasskey(ctx context.Context, pk passkeys.Passkey, rpName string) (string, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -160,40 +171,50 @@ func (v *Vault) SavePasskey(ctx context.Context, pk passkeys.Passkey, rpName str
 		field(2, "user handle", op.ItemFieldTypeText, pk.UserHandle), field(3, "user name", op.ItemFieldTypeText, pk.UserName),
 		field(4, "public key", op.ItemFieldTypeText, pk.PublicKey), field(5, "secure enclave key", op.ItemFieldTypeConcealed, pk.KeyHandle),
 		field(6, "device", op.ItemFieldTypeText, host)}
-	section := op.ItemSection{ID: sec, Title: PasskeySection}
-	// on the site's existing login for that username, in whichever allowed vault has it
-	for _, p := range vaults {
+	target := -1
+	for i, p := range vaults {
 		list, err := v.itemList(ctx, p)
 		if err != nil {
 			return "", err
 		}
 		for _, o := range list {
-			if o.Category != op.ItemCategoryLogin || !related(overviewURLs(o), pk.RPID) {
+			if !related(overviewURLs(o), pk.RPID) {
 				continue
 			}
 			it, err := v.item(ctx, p, o.ID)
-			if err != nil || PasskeyOf(it) != nil {
+			if err != nil {
 				continue
 			}
-			if u := PickField(it, "username", false); u != nil && u.Value == pk.UserName {
-				it.Sections = append(it.Sections, section)
-				it.Fields = append(it.Fields, fields...)
-				saved, err := p.store.Put(ctx, it)
-				v.forget()
-				return saved.Title, err
+			if slices.Contains(it.Tags, PasskeyTag) { // Chrome Relay's own item: the only kind it replaces
+				if old := PasskeyOf(it); old != nil && old.RPID == pk.RPID && old.UserName == pk.UserName {
+					it.Fields = append(slices.DeleteFunc(it.Fields, func(f op.ItemField) bool { return f.SectionID != nil && *f.SectionID == sec }), fields...)
+					saved, err := p.store.Put(ctx, it)
+					v.forget()
+					return saved.Title, err
+				}
+				continue
+			}
+			if target < 0 && o.Category == op.ItemCategoryLogin {
+				if u := PickField(it, "username", false); u != nil && u.Value == pk.UserName {
+					target = i
+				}
 			}
 		}
 	}
-	// else a new Login item in the first allowed vault
-	title := pk.UserName
-	if title == "" {
-		title = "passkey"
+	if target < 0 {
+		target = 0
+	}
+	who := pk.UserName
+	if who == "" {
+		who = "passkey"
 	}
 	if rpName == "" {
 		rpName = pk.RPID
 	}
-	saved, err := vaults[0].store.Create(ctx, op.ItemCreateParams{Category: op.ItemCategoryLogin, VaultID: vaults[0].id, Title: fmt.Sprintf("%s (%s)", rpName, title),
-		Sections: []op.ItemSection{section},
+	p := vaults[target]
+	saved, err := p.store.Create(ctx, op.ItemCreateParams{Category: op.ItemCategoryLogin, VaultID: p.id,
+		Title: fmt.Sprintf("%s passkey (%s) · Chrome Relay", rpName, who), Tags: []string{PasskeyTag},
+		Sections: []op.ItemSection{{ID: sec, Title: PasskeySection}},
 		Fields:   append([]op.ItemField{{ID: "username", Title: "username", FieldType: op.ItemFieldTypeText, Value: pk.UserName}}, fields...),
 		Websites: []op.Website{{URL: "https://" + pk.RPID, Label: "website", AutofillBehavior: op.AutofillBehaviorAnywhereOnWebsite}}})
 	v.forget()
@@ -208,16 +229,12 @@ func overviewURLs(o op.ItemOverview) []string {
 	return urls
 }
 
-// SDK is the real 1Password, through the Go SDK: the desktop app as one of your accounts, or a service account.
+// SDK is the real 1Password, through the Go SDK, as a service account.
 type SDK struct{ C *op.Client }
 
-func Connect(version string) func(ctx context.Context, account, token string) (Store, error) {
-	return func(ctx context.Context, account, token string) (Store, error) {
-		auth := op.WithServiceAccountToken(token)
-		if account != "" {
-			auth = op.WithDesktopAppIntegration(account) // 1Password asks the person to allow Chrome Relay
-		}
-		c, err := op.NewClient(ctx, auth, op.WithIntegrationInfo("Chrome Relay", version))
+func Connect(version string) func(ctx context.Context, token string) (Store, error) {
+	return func(ctx context.Context, token string) (Store, error) {
+		c, err := op.NewClient(ctx, op.WithServiceAccountToken(token), op.WithIntegrationInfo("Chrome Relay", version))
 		if err != nil {
 			return nil, err
 		}

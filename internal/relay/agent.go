@@ -87,6 +87,7 @@ type callFrom struct {
 // Agent: one agent connection. All methods run with s.mu held.
 type Agent struct {
 	s                    *Server
+	passkeysUntil        time.Time // one approval covers this agent's passkey sign-ins until then (the reuse window)
 	conn                 *conn
 	email, app, cwd, sid string
 	last                 time.Time
@@ -321,6 +322,13 @@ func (a *Agent) onMessage(m message) {
 			}
 		}
 		if r.Error != "" {
+			if strings.Contains(r.Error, "Detached while handling command") {
+				// Chrome cut the debugger for a moment: another extension (1Password) put its frame in the page. The
+				// tab's shim removes it and the extension re-attaches; this command may or may not have run.
+				r.Error = "INTERRUPTED: another extension (usually 1Password) briefly put its frame in the page, and Chrome Relay removed it. " +
+					"This command may not have run: check the page (and a field's value, if you were typing), then retry it."
+				a.s.audit(a, "interrupted", "tab", tab, "method", m.Method)
+			}
 			a.err(m, r.Error)
 		} else {
 			a.ok(m, r.Result)
@@ -468,7 +476,24 @@ func (a *Agent) prepare(t int, openerID *int) error {
 		return fmt.Errorf("could not set up the tab: %v", failed)
 	}
 	a.setup[t] = slices.Clone(steps[1:])
+	a.blockPasskeyDialogs(p, t)
 	return nil
+}
+
+// blockPasskeyDialogs: a passkey request that doesn't come through the relay's page script (one the page makes
+// before it, from a frame, or with a saved copy of the browser's own function) would open Chrome's or macOS's "save
+// a passkey" dialogs on the person's screen. A virtual authenticator in this tab takes those instead, and never
+// confirms, so they time out quietly. Only this tab; best effort: an older Chrome without it still works.
+func (a *Agent) blockPasskeyDialogs(p *profile, t int) {
+	if r := a.cdp(p, t, "WebAuthn.enable", map[string]any{"enableUI": false}); r.Error != "" {
+		a.s.log("tab", t, "can't keep Chrome's passkey dialogs out:", r.Error)
+		return
+	}
+	r := a.cdp(p, t, "WebAuthn.addVirtualAuthenticator", map[string]any{"options": map[string]any{"protocol": "ctap2", "transport": "internal",
+		"hasResidentKey": true, "hasUserVerification": true, "isUserVerified": false, "automaticPresenceSimulation": false}})
+	if r.Error != "" {
+		a.s.log("tab", t, "can't keep Chrome's passkey dialogs out:", r.Error)
+	}
 }
 
 // onPageCall: a message from page script in an agent tab (window.open, popups' postMessage, passkeys).
@@ -773,6 +798,7 @@ func (a *Agent) onReattached(t int) bool {
 	if _, ok := a.handoffs[t]; ok {
 		delete(a.handoffs, t)
 		a.s.audit(a, "passkey handoff done", "tab", t, "url", a.urls[t])
+		a.s.unalert(t)
 	}
 	// Same tab, new debugger session: restore what the agent had switched on, then let held commands run.
 	err := a.extMust(p, map[string]any{"op": "cdp", "tabId": t, "method": "Emulation.setFocusEmulationEnabled", "params": map[string]any{"enabled": true}})
@@ -781,6 +807,23 @@ func (a *Agent) onReattached(t int) bool {
 			break
 		}
 		err = a.extMust(p, map[string]any{"op": "cdp", "tabId": t, "method": st.Method, "params": st.Params})
+	}
+	if err == nil {
+		a.blockPasskeyDialogs(p, t) // a new debugger session: the old one's authenticator went with it
+	}
+	if err == nil {
+		// A page that loaded while the debugger was off has no passkey script: its passkey requests would reach
+		// Chrome's own dialogs, which the person would have to dismiss. Load it again, with the scripts in place.
+		r := a.cdp(p, t, "Runtime.evaluate", map[string]any{"expression": "window.__agentBridgeLate === true", "returnByValue": true})
+		var late struct {
+			Result struct {
+				Value bool `json:"value"`
+			} `json:"result"`
+		}
+		if r.Error == "" && json.Unmarshal(r.Result, &late) == nil && late.Result.Value {
+			a.s.log("tab", t, "loaded a page while the debugger was off; reloading it so Chrome Relay's page scripts run first")
+			err = a.extMust(p, map[string]any{"op": "cdp", "tabId": t, "method": "Page.reload", "params": map[string]any{}})
+		}
 	}
 	if err != nil {
 		// All or nothing: without the full setup (focus, popup shim, the agent's own enables) the tab would
@@ -817,8 +860,16 @@ func (a *Agent) onDetached(t int, d detach) bool {
 		if hasNote {
 			why = note.NeedsUser
 		}
+		h, handedOn := a.handoffs[t]
+		if handedOn {
+			why = "nobody approved the passkey for " + h.rpID + " in 1Password"
+			a.s.log("tab", t, "passkey handoff expired: nobody approved the passkey for", h.rpID, "in 1Password")
+			a.s.unalert(t)
+		}
 		a.s.audit(a, "blocked", "tab", t, "url", cleanURL(d.url), "why", why)
-		if hasNote {
+		if handedOn {
+			a.blocked = fmt.Sprintf("PASSKEY APPROVAL TIMED OUT: the page asked for a passkey for %s that only 1Password has, and nobody approved it in 1Password's prompt within 5 minutes. That tab is no longer yours. When the person is at this Mac, open the page again and ask them to click the Chrome Relay icon in Chrome's toolbar and approve.", h.rpID)
+		} else if hasNote {
 			site := note.Site
 			if site == "" {
 				site = "a site"

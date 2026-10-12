@@ -78,7 +78,7 @@ several, pick one with `./build --identity "<name>"`; it's remembered. `chrome-r
 you have.
 
 Then, **in each Chrome profile agents should use**: open `chrome://extensions`, turn on **Developer mode**,
-**Load unpacked**, and pick the `extension` folder of your clone. Check with `chrome-relay doctor`.
+**Load unpacked**, pick the `extension` folder of your clone, and **pin** it (puzzle-piece icon → pin) so you see its badge. Check with `chrome-relay doctor`.
 
 After `git pull`: `./build && chrome-relay update` (rebuilds, restarts the relay, reloads the extension in every
 profile).
@@ -130,7 +130,14 @@ Nothing below happens unless you set it up, and each part can be turned off agai
 | Background tabs, Google sign-in hops, audit trail | on | `./chrome-relay setup` | `chrome-relay uninstall` |
 | Signing in with 1Password (passwords, 2-step codes) | **off** | `chrome-relay vault setup` | `chrome-relay vault forget` |
 | Passkeys in agent tabs | on: 1Password's own prompt answers, or Chrome Relay's Secure Enclave passkeys if you have 1Password set up | `chrome-relay passkeys on` | `chrome-relay passkeys off` |
-| One Touch ID for several passkey sign-ins | **off** (every signature asks) | `chrome-relay passkeys reuse 120` (1–300 s) | `chrome-relay passkeys reuse off` |
+| Approving on your iPhone (Face ID), when away from the Mac | **off** | `chrome-relay phone pair` | `chrome-relay phone forget` |
+| Notifications when an agent needs you (a sign-in, a passkey to approve in 1Password) | on once you allow them | `chrome-relay notify test`, then allow | System Settings > Notifications > Chrome Relay |
+| One approval for several passkey sign-ins | **off** (every signature asks) | `chrome-relay passkeys reuse 120` (1–300 s) | `chrome-relay passkeys reuse off` |
+
+The notifications come from *Chrome Relay.app*, a small app `./build` makes and `setup` puts in `~/Applications`
+(it needs Xcode's command line tools). It exists because Chrome's own notifications are often switched off in
+macOS, and the extension's toolbar badge only shows while the extension is pinned. Clicking one opens the tab
+that needs you. A Focus (Do Not Disturb) hides them unless you let Chrome Relay through.
 
 With passkeys off, agent tabs leave pages' WebAuthn alone (Chrome then refuses it in background tabs, as it
 would anyway). With no vault set up, the relay never talks to 1Password, prompts for nothing and stores no
@@ -144,41 +151,41 @@ Agents can sign in with logins from 1Password: passwords, 2-step codes (TOTP) an
 value: they name an item, and the relay types the value into the page, only on that item's website.
 
 ```bash
-chrome-relay vault setup     # pick your 1Password accounts and which of their vaults agents may use
+chrome-relay vault setup     # asks which 1Password accounts, then makes a shared vault and a service account in each
 chrome-relay vault           # what agents can see: vaults, titles, websites, usernames, what each item holds
 ```
 
-**Through your 1Password app (the default).** Setup lists the 1Password accounts on this Mac (several at once
-are fine, e.g. personal and work), shows each one's vaults, and you tick the ones agents may use, say *Private*
-and *Shared with Chrome Relay*. Nothing is stored: the relay connects through the 1Password app (1Password's
-Go SDK; turn on *Settings → Developer → Integrate with other apps*), and **1Password asks you to allow it** when
-the relay first needs an account, and again after about 10 idle minutes or when 1Password locks. Vaults you
-didn't tick stay out of reach, and so does every item outside its own website.
-
-**Through a service account**, for a vault shared with agents that should work without you (a bot user, a
-staging admin): `chrome-relay vault setup <vault>` asks for the token of a
-[service account](https://developer.1password.com/docs/service-accounts/) with access to **that vault only**
-(*Read Items*, plus *Write Items* if agents may save new passkeys there). 1Password itself then keeps everything
-else out of reach.
+**Through 1Password service accounts.** `chrome-relay vault setup` lists the 1Password accounts on this Mac and
+asks which agents may use: one, several (say personal and work) or all. In each it creates a shared vault if
+there isn't one ("Shared with Chrome Relay (personal)", "… (acme)": the names must differ, since agents name vaults
+only by name), and a [service account](https://developer.1password.com/docs/service-accounts/) that can read and
+write **that vault only**, using your [1Password CLI](https://developer.1password.com/docs/cli/) (1Password asks
+you to approve once). Each token goes straight into this Mac's Keychain, never on screen. It tells you what it
+made; see or revoke it on 1Password.com (Developer > Directory > Service Accounts). Then move or copy into those
+vaults the logins agents may use. Service accounts work in the background and while you're away, with no
+1Password prompts after setup. 1Password never lets a service account into a Private vault, which is why agents
+get their own. One account without questions: `vault setup <vault> --account <email>`; a service account you made
+yourself: `--paste` takes its token.
 
 Agents fill a field with a [secret reference](https://developer.1password.com/docs/cli/secret-reference-syntax/)
 and the relay types the real value:
 
 ```bash
-agent-browser fill @e2 "op://Private/Twilio/username"
-agent-browser fill @e3 "op://Private/Twilio/password"
-agent-browser fill @e7 "op://Private/Twilio/otp"      # the current one-time code, computed from the item's TOTP secret
+agent-browser fill @e2 "op://Shared with Chrome Relay/Twilio/username"
+agent-browser fill @e3 "op://Shared with Chrome Relay/Twilio/password"
+agent-browser fill @e7 "op://Shared with Chrome Relay/Twilio/otp"   # the current one-time code, from the item's TOTP secret
 ```
 
 - **Which account.** You may have several logins for one site (three Twilio items, say). The relay never picks:
   the agent names the item, choosing by the vault, title and username `chrome-relay vault` shows it, and asks you
   when your request doesn't say which.
-- **Chrome Relay asks too, with the details.** Its own Touch ID prompt names the agent, item and site:
-  *"chrome-relay is trying to let Claude Code (my-repo) fill the password of "Twilio" on www.twilio.com"*. How
-  often is yours to choose in setup: **once per agent session** (the default with the 1Password app: one tap,
-  naming the vaults, covers that agent's sign-ins until it disconnects), **every sign-in** (one tap covers that
-  agent, item and site for a minute: username, password, one-time code), or **never** (1Password's prompt only).
-  Decline anything you didn't expect.
+- **Chrome Relay asks too, with the details.** Its own approval names the agent, item and site, on Touch ID
+  here and, if you paired one, Face ID on your iPhone at the same time (first answer wins; see below):
+  *"let Claude Code (my-repo) sign in to www.twilio.com as you@company.com with "Twilio" from 1Password"*. How
+  often is yours: **every sign-in** (the default: one approval lets that agent use that item for two minutes:
+  its username, password and one-time code, on any of the item's websites), **once per agent session** (one approval, naming the vaults, covers that
+  agent's sign-ins until it disconnects), or **never**. Change it with `chrome-relay vault approve
+  sign-in|session|off`, which asks you first. Decline anything you didn't expect.
 - **Only the item's site.** A value is typed only into a page whose host is the item's website or a subdomain
   of it, over https (or `localhost`), in the page itself rather than a frame inside it, like 1Password's own
   filling. References to any other vault are refused.
@@ -187,27 +194,37 @@ agent-browser fill @e7 "op://Private/Twilio/otp"      # the current one-time cod
 - **Passkeys, in this Mac's Secure Enclave.** Chrome won't run WebAuthn in a background tab, and 1Password's
   passkey prompt would knock the debugger off the page, so agent tabs hand `navigator.credentials.create/get` to
   the relay, which acts as the authenticator (ES256, no attestation). The keys themselves are made by the Mac's
-  **Secure Enclave** and never leave it: `chrome-relay` asks the chip to create a key or sign, and **every
-  signature needs your Touch ID**. The prompt says who is asking, for which site and account: *"chrome-relay is
-  trying to let Claude Code (my-repo) sign in to github.com as bot@company.com, from github.com"*. Neither the
-  relay, the vault nor the agent ever holds a private key. If an agent signs in to many sites in a row,
-  `chrome-relay passkeys reuse 120` lets one Touch ID cover **that agent's** passkey sign-ins for 2 minutes (up to
-  300 seconds; the prompt says so; other agents still ask). Off by default. A site's "Create a passkey" (only right after the agent clicked or typed in the page) stores the
-  public key and the chip's handle in the vault (on the item for that site with the same username, else a new
-  Login item, in a *Passkey (Chrome Relay)* section); the handle is useless on any other Mac, so such a passkey
-  works on the Mac that made it.
+  **Secure Enclave** and never leave it: `chrome-relay` asks the chip to create a key or sign. **Every
+  sign-in needs your approval**, Touch ID here or Face ID on your paired iPhone, saying who is asking, for which
+  site and account: *"chrome-relay is trying to let Claude Code (my-repo) sign in to github.com as
+  bot@company.com, from github.com"*. Neither the relay, the vault nor the agent ever holds a private key. If an
+  agent signs in to many sites in a row, `chrome-relay passkeys reuse 120` lets one approval cover **that
+  agent's** passkey sign-ins for 2 minutes (up to 300 seconds; the prompt says so; other agents still ask). Off by
+  default. A site's "Create a passkey" (only right after the agent clicked or typed in the page, and while the
+  Mac is unlocked) stores the public key in the vault, in an item of its own (*"GitHub passkey (you) · Chrome
+  Relay"*, tagged `chrome-relay-passkey`), in the vault that holds the site's login for that username, so a work
+  account's passkey stays in the work account. Chrome Relay never changes your own items: the only items it
+  edits are the ones it made. The chip's handle for the key stays in Chrome Relay's
+  own Keychain item, so only your `chrome-relay`, on this Mac, can use it. Passkeys made by an older Chrome Relay
+  keep asking for Touch ID on the Mac itself.
 - **Your own 1Password passkeys** (your Google passkey, say) never leave 1Password: no program can read them.
   When a page asks for a passkey the relay doesn't hold, the request goes to 1Password's own prompt in the
-  agent's tab, and you approve it. The Chrome Relay icon shows a red **key** badge; clicking it opens that tab
-  (the only time an agent tab comes forward, and only on your click). The tab waits up to 5 minutes, and the
-  agent is told `PASSKEY APPROVAL NEEDED` so it can ask you. This works with no vault set up at all.
+  agent's tab, and you approve it. Chrome Relay notifies you, and its toolbar icon shows a red **key** badge.
+  Clicking either opens that tab (the only time an agent tab comes forward, and only on your click). The tab
+  waits up to 5 minutes, and the agent is told `PASSKEY APPROVAL NEEDED` so it can ask you. This works with no
+  vault set up at all.
+- **Giving an account a Chrome Relay passkey.** Ask your agent ("add a Chrome Relay passkey to my Google
+  account"). It opens the site's passkey settings, you approve the site's "verify it's you" step, and it
+  clicks "Create a passkey". From then on that account signs in with only your approval, wherever you are.
+  The skill has the steps.
 - **Audited.** Every fill, refusal, passkey creation and passkey sign-in is in `chrome-relay audit` (item and
   field names, never values).
-- **Signing.** Loading the 1Password app's library into the relay needs the `disable-library-validation`
-  entitlement (the library is signed by AgileBits, not you); debuggers and `DYLD_*` injection stay blocked.
+- **Signing.** The hardened runtime with library validation on: no library signed by anyone else loads into
+  `chrome-relay`, and debuggers and `DYLD_*` injection are blocked. (The 1Password SDK compiles WebAssembly, the
+  one exception: `allow-unsigned-executable-memory`.)
 
-**Where a service account's token lives** (the 1Password app needs none). In your login Keychain (item
-*Chrome Relay*), in two layers:
+**Where the service account tokens live.** In your login Keychain (items *Chrome Relay*, one per account), in
+two layers:
 
 1. **Only your signed `chrome-relay` reads the item.** It creates the item itself, so macOS ties it to the
    binary's signature: any other program that asks (`security`, a script, an agent) gets macOS's *"… wants to
@@ -215,7 +232,21 @@ agent-browser fill @e7 "op://Private/Twilio/otp"      # the current one-time cod
    Claude Code's and Codex's own logins included, store theirs through Apple's `security` tool, which every
    program on your Mac can run silently. Chrome Relay deliberately doesn't.)
 2. **What's in the item is locked to this Mac's Secure Enclave.** Even a program you let through gets only
-   ciphertext: opening it takes the chip and your Touch ID.
+   ciphertext that opens on this Mac alone. Opening it asks you nothing (after `vault setup`, no Touch ID for
+   the token ever); each sign-in is approved instead, as often as you chose. That choice is kept in the same
+   item, not in `config.json`, so nothing an agent can edit switches approvals off: change it with
+   `chrome-relay vault approve session|sign-in|off`, which asks you first.
+
+### Approving from your iPhone
+
+When you're away from the Mac, a paired iPhone can approve instead: `chrome-relay phone pair` (after Touch ID)
+shows a QR code; scan it with the iPhone's Camera and open it in *Chrome Relay Approve* (`ios/`, built and
+installed with `./ios/build`). From then on every approval goes to Touch ID here and to the iPhone at once, and
+the first answer wins. The iPhone shows the Mac, the agent and what it asks, and approves with Face ID: its key
+for that lives in the iPhone's Secure Enclave, and the Mac checks the signature against the key it paired with,
+so nothing in between can approve. Requests and answers travel through [ntfy](https://ntfy.sh) (or your own
+ntfy server, `--server`), encrypted to the phone; the ntfy iPhone app can notify you (`chrome-relay phone` says
+which topic).
 
 The relay talks to 1Password in-process (no `op` command, so the token never sits in another process's
 environment), keeps the token in memory only while it runs, and is built with the hardened runtime, so no
