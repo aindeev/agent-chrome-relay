@@ -43,18 +43,7 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 		return
 	}
 	// what has focus is checked last, right before typing
-	r := a.cdp(p, t, "Runtime.evaluate", map[string]any{"expression": strings.TrimSuffix(focusedExpr, "\n"), "returnByValue": true})
-	var res struct {
-		Result struct {
-			Value *struct {
-				Frame bool   `json:"frame"`
-				Tag   string `json:"tag"`
-				Type  string `json:"type"`
-			} `json:"value"`
-		} `json:"result"`
-	}
-	json.Unmarshal(r.Result, &res)
-	el := res.Result.Value
+	el := a.focusedField(p, t)
 	switch {
 	case !a.tabs[t]:
 		refuse(errors.New("the tab was closed"))
@@ -75,14 +64,136 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 			refuse(errors.New(sent.Error))
 			return
 		}
-		if v.Kind == "secret" {
-			a.hide(v.Value)
-		}
+		a.hide(v.Value) // secrets, and one-time codes too: nothing the agent reads back shows them
 		a.filled[t] = v.Item
 		a.s.audit(a, "1password fill", "tab", t, "item", v.Item, "field", v.Field, "url", u)
 		a.s.log("1password: filled", v.Field, "of", v.Item, "in tab", t)
 		a.ok(m, nil)
 	}
+}
+
+// field: the focused element, as focused.js describes it (nil: no text field has focus).
+type field struct {
+	Frame bool   `json:"frame"`
+	Tag   string `json:"tag"`
+	Type  string `json:"type"`
+}
+
+func (a *Agent) focusedField(p *profile, t int) *field {
+	r := a.cdp(p, t, "Runtime.evaluate", map[string]any{"expression": strings.TrimSuffix(focusedExpr, "\n"), "returnByValue": true})
+	var res struct {
+		Result struct {
+			Value *field `json:"value"`
+		} `json:"result"`
+	}
+	json.Unmarshal(r.Result, &res)
+	return res.Result.Value
+}
+
+// saveSecret: a ?new reference (vault/save.go). A new login: Chrome Relay makes the password, saves the item and
+// types the password (the same reference again types the same one, for "confirm password"). 2-step verification:
+// it reads the setup key from the page, saves it and types the current code. The agent sees neither.
+func (a *Agent) saveSecret(t int, child string, m message, ref string, r vault.SaveRef, parseErr error) {
+	p, u := a.p(), a.urls[t]
+	refuse := func(err error) {
+		a.s.audit(a, "1password save refused", "tab", t, "ref", ref, "url", u, "why", err.Error())
+		a.s.log("1password: save refused", ref, "in tab", t, "-", err.Error())
+		a.err(m, "1Password: "+err.Error())
+	}
+	el := a.focusedField(p, t)
+	switch {
+	case parseErr != nil:
+		refuse(parseErr)
+		return
+	case child != "" || (el != nil && el.Frame):
+		refuse(errors.New("secrets are only typed into the page itself, not into a frame inside it"))
+		return
+	case el == nil:
+		refuse(errors.New("no text field has focus: use `agent-browser fill @ref <reference>` on the field"))
+		return
+	case r.Field == "password" && el.Type != "password":
+		refuse(errors.New("a new password only goes into a password field"))
+		return
+	}
+	var v vault.Value
+	var err error
+	key := a.sid + "|" + ref
+	if r.Field == "password" {
+		if nl, ok := a.newLogins[key]; ok && time.Since(nl.at) < 10*time.Minute {
+			v = nl.v // "confirm password": the same one, saved already
+		} else {
+			a.s.mu.Unlock()
+			v, err = a.s.vault.NewLogin(context.Background(), r, a.targetURLOf(t), a.who())
+			a.s.mu.Lock()
+			if err == nil {
+				a.newLogins[key] = newLogin{v, time.Now()}
+				a.s.audit(a, "1password saved login", "tab", t, "item", v.Item, "username", r.Username, "url", u)
+				a.s.log("1password: saved a new login", v.Item, "from tab", t)
+			}
+		}
+	} else {
+		secret, ferr := a.pageOTPSecret(p, t)
+		if ferr != nil {
+			refuse(ferr)
+			return
+		}
+		a.hide(secret)
+		a.s.mu.Unlock()
+		v, err = a.s.vault.SaveOTP(context.Background(), r, secret, a.targetURLOf(t), a.who())
+		a.s.mu.Lock()
+		if err == nil {
+			a.s.audit(a, "1password saved one-time code", "tab", t, "item", v.Item, "url", u)
+			a.s.log("1password: saved a one-time code setup in", v.Item, "from tab", t)
+		}
+	}
+	if err != nil {
+		refuse(err)
+		return
+	}
+	switch {
+	case !a.tabs[t]:
+		refuse(errors.New("the tab was closed (the secret is saved in 1Password)"))
+		return
+	case a.urls[t] != u:
+		refuse(errors.New("the page changed while 1Password answered (the secret is saved in 1Password); fill the field again with the plain reference"))
+		return
+	}
+	if sent := a.cdp(p, t, "Input.insertText", map[string]any{"text": v.Value}); sent.Error != "" {
+		refuse(errors.New(sent.Error))
+		return
+	}
+	a.hide(v.Value)
+	a.filled[t] = v.Item
+	a.ok(m, nil)
+}
+
+// pageOTPSecret: the one 2-step setup key the page shows (otpsetup.js), or why there isn't one.
+func (a *Agent) pageOTPSecret(p *profile, t int) (string, error) {
+	r := a.cdp(p, t, "Runtime.evaluate", map[string]any{"expression": strings.TrimSuffix(otpSetupExpr, "\n"), "returnByValue": true, "awaitPromise": true})
+	var res struct {
+		Result struct {
+			Value struct {
+				URIs []string `json:"uris"`
+				Keys []string `json:"keys"`
+			} `json:"value"`
+		} `json:"result"`
+	}
+	if r.Error != "" {
+		return "", fmt.Errorf("could not read the page: %s", r.Error)
+	}
+	json.Unmarshal(r.Result, &res)
+	found := res.Result.Value
+	cands := slices.Compact(slices.Sorted(slices.Values(found.URIs)))
+	if len(cands) == 0 {
+		cands = slices.Compact(slices.Sorted(slices.Values(found.Keys)))
+	}
+	switch len(cands) {
+	case 0:
+		return "", errors.New("the page shows no 2-step setup key: if it offers \"can't scan the QR code?\" or \"enter a setup key\", click that to show the key, then fill again")
+	case 1:
+		return cands[0], nil
+	}
+	return "", fmt.Errorf("the page shows %d possible setup keys; open the page where only the one being set up is shown", len(cands))
 }
 
 // targetURLOf: the full committed URL (the vault checks its scheme and host).

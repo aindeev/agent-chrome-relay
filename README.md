@@ -128,7 +128,7 @@ Nothing below happens unless you set it up, and each part can be turned off agai
 | Feature | Default | Turn on | Turn off |
 |---|---|---|---|
 | Background tabs, Google sign-in hops, audit trail | on | `./chrome-relay setup` | `chrome-relay uninstall` |
-| Signing in with 1Password (passwords, 2-step codes) | **off** | `chrome-relay vault setup` | `chrome-relay vault forget` |
+| Signing in with 1Password (passwords, 2-step codes), and saving the logins agents create | **off** | `chrome-relay vault setup` | `chrome-relay vault forget` |
 | Passkeys in agent tabs | on: 1Password's own prompt answers, or Chrome Relay's Secure Enclave passkeys if you have 1Password set up | `chrome-relay passkeys on` | `chrome-relay passkeys off` |
 | Approving on your iPhone (Face ID), when away from the Mac | **off** | `chrome-relay phone pair` | `chrome-relay phone forget` |
 | Notifications when an agent needs you (a sign-in, a passkey to approve in 1Password) | on once you allow them | `chrome-relay notify test`, then allow | System Settings > Notifications > Chrome Relay |
@@ -191,6 +191,12 @@ agent-browser fill @e7 "op://Shared with Chrome Relay/Twilio/otp"   # the curren
   filling. References to any other vault are refused.
 - **Secrets only into password fields**, so they show as dots on screen and in the agent's snapshots. If the
   agent (or the page) reads a filled secret back, the relay masks it in everything it sends the agent.
+- **Saving what agents create.** When an agent signs up for something or turns on 2-step verification for you,
+  it fills a reference ending in `?new` (`op://Shared with Chrome Relay/Acme/password?new&username=bot@acme.com`,
+  `op://Shared with Chrome Relay/Acme/otp?new`). Chrome Relay generates the password, or reads the 2-step setup key
+  from the page (its QR code or the key in text), saves it in 1Password, and types it, after you approve the save.
+  The agent never sees either. New logins are Login items tagged `chrome-relay-saved`; a 2-step key for a login of
+  yours goes into a separate item beside it, since Chrome Relay never changes your items.
 - **Passkeys, in this Mac's Secure Enclave.** Chrome won't run WebAuthn in a background tab, and 1Password's
   passkey prompt would knock the debugger off the page, so agent tabs hand `navigator.credentials.create/get` to
   the relay, which acts as the authenticator (ES256, no attestation). The keys themselves are made by the Mac's
