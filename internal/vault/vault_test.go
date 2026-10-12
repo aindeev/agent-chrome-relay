@@ -87,11 +87,15 @@ func fixture() (*Vault, *fakeStore, *fakePerson, *time.Time) {
 	person := &fakePerson{}
 	now := time.Unix(1_800_000_010, 0)
 	v := &Vault{Settings: func() Settings { return Settings{Sources: []Source{{Vaults: []string{"Shared with Chrome Relay"}}}} },
-		Person: person, Now: func() time.Time { return now }, Connect: func(context.Context, string) (Store, error) { return store, nil }}
+		Person: person, Now: func() time.Time { return now }, Connect: func(context.Context, string) (Store, error) { return store, nil },
+		Device: thisMac}
 	return v, store, person, &now
 }
 
 var claude = Who{Name: "Claude Code (my-repo)", Session: "s1"}
+
+func thisMac() (string, string)  { return "mac-a", "Sam's MacBook Pro" }
+func otherMac() (string, string) { return "mac-b", "Sam's Mac mini" }
 
 func TestTOTPMatchesRFC6238(t *testing.T) {
 	uri := "otpauth://totp/x?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&digits=8"
@@ -196,22 +200,22 @@ func TestSummaryHasNoSecretsAndPasskeysAreStored(t *testing.T) {
 		return passkeys.Passkey{RPID: rp, CredentialID: "cred-" + rp, UserHandle: "AQID", UserName: user, PublicKey: "PUB", KeyHandle: "CHIP-" + rp}
 	}
 	before := fmt.Sprint(store.items[0])
-	if title, _ := v.SavePasskey(ctx, pk("github.com", "agent-bot"), "GitHub"); title != "GitHub passkey (agent-bot) · Chrome Relay" {
+	if title, _ := v.SavePasskey(ctx, pk("github.com", "agent-bot"), "GitHub"); title != "GitHub passkey (agent-bot) · Chrome Relay · Sam's MacBook Pro" {
 		t.Fatal("an item of its own, got", title)
 	}
 	if fmt.Sprint(store.items[0]) != before || PasskeyOf(store.items[0]) != nil {
 		t.Fatal("the person's own item is never changed")
 	}
-	if title, _ := v.SavePasskey(ctx, pk("webauthn.example", "bot"), "Demo"); title != "Demo passkey (bot) · Chrome Relay" {
+	if title, _ := v.SavePasskey(ctx, pk("webauthn.example", "bot"), "Demo"); title != "Demo passkey (bot) · Chrome Relay · Sam's MacBook Pro" {
 		t.Fatal("named for the site and account, got", title)
 	}
 	n := len(store.items)
 	again := pk("webauthn.example", "bot")
 	again.CredentialID, again.KeyHandle = "cred-2", "CHIP-2"
-	if title, _ := v.SavePasskey(ctx, again, "Demo"); title != "Demo passkey (bot) · Chrome Relay" || len(store.items) != n {
+	if title, _ := v.SavePasskey(ctx, again, "Demo"); title != "Demo passkey (bot) · Chrome Relay · Sam's MacBook Pro" || len(store.items) != n {
 		t.Fatal("a second passkey for that site and account replaces the first, in Chrome Relay's own item:", title, len(store.items))
 	}
-	if gh, _ := v.Passkeys(ctx, "github.com", claude); len(gh) != 1 || gh[0].Item != "GitHub passkey (agent-bot) · Chrome Relay" {
+	if gh, _ := v.Passkeys(ctx, "github.com", claude); len(gh) != 1 || gh[0].Item != "GitHub passkey (agent-bot) · Chrome Relay · Sam's MacBook Pro" {
 		t.Fatalf("%+v", gh)
 	}
 	twice := store.items[len(store.items)-1] // the same passkey recorded in two items is one passkey
@@ -359,7 +363,7 @@ func TestAPasskeyGoesWhereItsAccountsLoginIs(t *testing.T) {
 	personal := &fakeStore{vault: "Shared (personal)"}
 	work := &fakeStore{vault: "Shared (acme)", items: []op.Item{{ID: "gh2", Title: "GitHub", Category: op.ItemCategoryLogin,
 		Websites: []op.Website{{URL: "https://github.com"}}, Fields: []op.ItemField{{ID: "username", Title: "username", FieldType: op.ItemFieldTypeText, Value: "sam-acme"}}}}}
-	v := &Vault{Person: &fakePerson{},
+	v := &Vault{Person: &fakePerson{}, Device: thisMac,
 		Settings: func() Settings {
 			return Settings{Sources: []Source{{Key: "HOME", Label: "sam@example.com", Vaults: []string{"Shared (personal)"}}, {Key: "WORK", Label: "sam@acme.com", Vaults: []string{"Shared (acme)"}}}}
 		},
@@ -378,5 +382,28 @@ func TestAPasskeyGoesWhereItsAccountsLoginIs(t *testing.T) {
 	}
 	if len(personal.items) != 0 || len(work.items) != 2 || !slices.Contains(work.items[1].Tags, PasskeyTag) {
 		t.Fatalf("into the work vault, beside sam-acme's login: personal %d, work %d", len(personal.items), len(work.items))
+	}
+}
+
+func TestEachMacUsesAndReplacesOnlyItsOwnPasskeys(t *testing.T) {
+	v, store, _, _ := fixture()
+	ctx := context.Background()
+	v.Summarize(ctx, claude) // opens the vault
+	pk := passkeys.Passkey{RPID: "github.com", CredentialID: "on-a", UserName: "agent-bot", KeyHandle: "chip-a"}
+	if _, err := v.SavePasskey(ctx, pk, "GitHub"); err != nil {
+		t.Fatal(err)
+	}
+	mini := &Vault{Settings: v.Settings, Person: v.Person, Now: v.Now, Connect: v.Connect, Device: otherMac} // the same vault, from another Mac
+	mini.Summarize(ctx, claude)
+	if got, _ := mini.Passkeys(ctx, "github.com", claude); len(got) != 0 {
+		t.Fatal("another Mac can't sign with this Mac's chip, so it doesn't offer its passkey:", got)
+	}
+	n := len(store.items)
+	pk.CredentialID, pk.KeyHandle = "on-b", "chip-b"
+	if title, _ := mini.SavePasskey(ctx, pk, "GitHub"); title != "GitHub passkey (agent-bot) · Chrome Relay · Sam's Mac mini" || len(store.items) != n+1 {
+		t.Fatal("the other Mac's passkey is an item of its own, beside the first:", title, len(store.items))
+	}
+	if got, _ := v.Passkeys(ctx, "github.com", claude); len(got) != 1 || got[0].CredentialID != "on-a" || got[0].DeviceID != "mac-a" || got[0].Device != "Sam's MacBook Pro" {
+		t.Fatalf("each Mac its own: %+v", got)
 	}
 }

@@ -114,15 +114,18 @@ Do one account at a time, and tell the person before each step that needs them:
 2. **Stay in that tab.** Google's "verify it's you" counts for that page only: a new tab or session asks again,
    which costs the person another approval. Once the settings page is back, `agent-browser reload` it once (the
    proof stays in the URL), so Chrome Relay's page scripts load before the site's.
-3. If a passkey named "Chrome Relay" is already listed, stop: don't create a second.
+3. If `chrome-relay vault` already shows a passkey for this site, account and Mac, stop: don't create a second.
 4. Click "Create a passkey" / "Add a passkey". Google then shows its own step: click "Continue passkey
    enrollment" (not "another device"). The relay makes the passkey at once (within 30s of your click) and the
    site says it's created; `chrome-relay audit 5 passkey` shows "passkey created".
 5. Sites guess its name from the Mac (Google lists it as "iCloud Keychain"): rename it "Chrome Relay" (the
    edit/pencil button; Google allows 20 characters) so the person can tell it apart. Google may also show
    "Approve this passkey?" (a security delay): that's the person's to approve, with their own passkey.
-6. `chrome-relay vault` lists it as "<site> passkey (<username>) · Chrome Relay", in the vault beside that
-   account's login. Check the site lists it too: "passkey created" means the relay made it, not that the site
+6. `chrome-relay vault` lists it as "<site> passkey (<username>) · Chrome Relay · <this Mac>", in the vault beside
+   that account's login. Passkeys are per Mac: the person may use Chrome Relay on several Macs with the same
+   vaults, and each Mac signs only with its own. One made on another Mac doesn't count here; if the site already
+   lists a "Chrome Relay" passkey from another Mac, add one for this Mac and name it after the Mac if the site
+   allows (e.g. "Chrome Relay MBP"). Check the site lists it too: "passkey created" means the relay made it, not that the site
    accepted it (if the site says registration failed, stop and tell the person).
 If Chrome's or macOS's own "Save a passkey" / "Choose where to save" dialog ever appears, the relay didn't get
 the request: stop and tell the person (they press Cancel); don't click again.

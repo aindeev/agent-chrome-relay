@@ -87,8 +87,9 @@ type Vault struct {
 	Connect  func(ctx context.Context, token string) (Store, error) // an SDK client for a service account token
 	Person   Person
 	Now      func() time.Time
-	Stamp    func() string // identifies the stored service account token: a new or removed one reconnects
-	CLI      string        // the command people run, for messages ("chrome-relay" or "chrome-relay-dev-mode")
+	Stamp    func() string            // identifies the stored service account token: a new or removed one reconnects
+	CLI      string                   // the command people run, for messages ("chrome-relay" or "chrome-relay-dev-mode")
+	Device   func() (id, name string) // this Mac, for its passkeys: several Macs may share the vaults (default: package device)
 
 	mu           sync.Mutex
 	open_        bool

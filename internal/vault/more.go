@@ -3,12 +3,12 @@ package vault
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 
 	op "github.com/1password/onepassword-sdk-go"
 
+	"github.com/aindeev/agent-chrome-relay/internal/device"
 	"github.com/aindeev/agent-chrome-relay/internal/passkeys"
 )
 
@@ -95,7 +95,7 @@ func PasskeyOf(it op.Item) *passkeys.Passkey {
 		return ""
 	}
 	pk := passkeys.Passkey{RPID: get("rp id"), CredentialID: get("credential id"), UserHandle: get("user handle"), UserName: get("user name"),
-		PublicKey: get("public key"), KeyHandle: get("secure enclave key"), Device: get("device"), Item: it.Title, ItemID: it.ID}
+		PublicKey: get("public key"), KeyHandle: get("secure enclave key"), Device: get("device"), DeviceID: get("device id"), Item: it.Title, ItemID: it.ID}
 	if pk.RPID == "" || pk.CredentialID == "" || pk.KeyHandle == "" {
 		return nil
 	}
@@ -135,13 +135,28 @@ func (v *Vault) Passkeys(ctx context.Context, rpID string, who Who) ([]passkeys.
 			if it, err := v.item(ctx, p, o.ID); err == nil {
 				// the same passkey recorded twice (an older Chrome Relay kept it in the person's item, and a copy
 				// moved it to an item of its own) is one passkey
-				if pk := PasskeyOf(it); pk != nil && pk.RPID == rpID && !slices.ContainsFunc(out, func(x passkeys.Passkey) bool { return x.CredentialID == pk.CredentialID }) {
+				if pk := PasskeyOf(it); pk != nil && pk.RPID == rpID && v.mine(pk) && !slices.ContainsFunc(out, func(x passkeys.Passkey) bool { return x.CredentialID == pk.CredentialID }) {
 					out = append(out, *pk)
 				}
 			}
 		}
 	}
 	return out, nil
+}
+
+// device: this Mac's ID and name.
+func (v *Vault) device() (string, string) {
+	if v.Device != nil {
+		return v.Device()
+	}
+	return device.ID(), device.Name()
+}
+
+// mine: a passkey this Mac can sign with. Its key is in one Mac's Secure Enclave; other Macs sharing the vault
+// skip it. Records from before device IDs were kept could only have come from one Mac, so they count.
+func (v *Vault) mine(pk *passkeys.Passkey) bool {
+	id, _ := v.device()
+	return pk.DeviceID == "" || pk.DeviceID == id
 }
 
 // PasskeyTag marks the items Chrome Relay made for its passkeys: the only items it ever changes.
@@ -162,7 +177,7 @@ func (v *Vault) SavePasskey(ctx context.Context, pk passkeys.Passkey, rpName str
 	if len(vaults) == 0 {
 		return "", v.notSetUp()
 	}
-	host, _ := os.Hostname()
+	devID, devName := v.device()
 	sec := "chrome_relay_passkey"
 	field := func(i int, title string, t op.ItemFieldType, value string) op.ItemField {
 		return op.ItemField{ID: fmt.Sprintf("chrome_relay_passkey_%d", i), Title: title, SectionID: &sec, FieldType: t, Value: value}
@@ -170,7 +185,7 @@ func (v *Vault) SavePasskey(ctx context.Context, pk passkeys.Passkey, rpName str
 	fields := []op.ItemField{field(0, "rp id", op.ItemFieldTypeText, pk.RPID), field(1, "credential id", op.ItemFieldTypeText, pk.CredentialID),
 		field(2, "user handle", op.ItemFieldTypeText, pk.UserHandle), field(3, "user name", op.ItemFieldTypeText, pk.UserName),
 		field(4, "public key", op.ItemFieldTypeText, pk.PublicKey), field(5, "secure enclave key", op.ItemFieldTypeConcealed, pk.KeyHandle),
-		field(6, "device", op.ItemFieldTypeText, host)}
+		field(6, "device", op.ItemFieldTypeText, devName), field(7, "device id", op.ItemFieldTypeText, devID)}
 	target := -1
 	for i, p := range vaults {
 		list, err := v.itemList(ctx, p)
@@ -186,7 +201,7 @@ func (v *Vault) SavePasskey(ctx context.Context, pk passkeys.Passkey, rpName str
 				continue
 			}
 			if slices.Contains(it.Tags, PasskeyTag) { // Chrome Relay's own item: the only kind it replaces
-				if old := PasskeyOf(it); old != nil && old.RPID == pk.RPID && old.UserName == pk.UserName {
+				if old := PasskeyOf(it); old != nil && old.RPID == pk.RPID && old.UserName == pk.UserName && old.DeviceID == devID {
 					it.Fields = append(slices.DeleteFunc(it.Fields, func(f op.ItemField) bool { return f.SectionID != nil && *f.SectionID == sec }), fields...)
 					saved, err := p.store.Put(ctx, it)
 					v.forget()
@@ -213,12 +228,17 @@ func (v *Vault) SavePasskey(ctx context.Context, pk passkeys.Passkey, rpName str
 	}
 	p := vaults[target]
 	saved, err := p.store.Create(ctx, op.ItemCreateParams{Category: op.ItemCategoryLogin, VaultID: p.id,
-		Title: fmt.Sprintf("%s passkey (%s) · Chrome Relay", rpName, who), Tags: []string{PasskeyTag},
+		Title: PasskeyTitle(rpName, who, devName), Tags: []string{PasskeyTag},
 		Sections: []op.ItemSection{{ID: sec, Title: PasskeySection}},
 		Fields:   append([]op.ItemField{{ID: "username", Title: "username", FieldType: op.ItemFieldTypeText, Value: pk.UserName}}, fields...),
 		Websites: []op.Website{{URL: "https://" + pk.RPID, Label: "website", AutofillBehavior: op.AutofillBehaviorAnywhereOnWebsite}}})
 	v.forget()
 	return saved.Title, err
+}
+
+// PasskeyTitle: one item per site, account and Mac ("GitHub passkey (sam) · Chrome Relay · Sam's MacBook Pro").
+func PasskeyTitle(site, user, mac string) string {
+	return fmt.Sprintf("%s passkey (%s) · Chrome Relay · %s", site, user, mac)
 }
 
 func overviewURLs(o op.ItemOverview) []string {

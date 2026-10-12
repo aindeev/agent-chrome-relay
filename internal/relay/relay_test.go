@@ -62,7 +62,8 @@ func newHarness(t *testing.T) *harness {
 		store: &memStore{items: testItems()}, person: &memPerson{}, chip: &softChip{}}
 	s.caller = func(int) Caller { h.mu.Lock(); defer h.mu.Unlock(); return h.caller }
 	s.isChrome = func(int) bool { h.mu.Lock(); defer h.mu.Unlock(); return h.chrome }
-	s.vault = &vault.Vault{Settings: s.vaultSettings, Person: h.person, Connect: func(context.Context, string) (vault.Store, error) { return h.store, nil }}
+	s.vault = &vault.Vault{Settings: s.vaultSettings, Person: h.person, Connect: func(context.Context, string) (vault.Store, error) { return h.store, nil },
+		Device: func() (string, string) { return "mac-a", "Sam's MacBook Pro" }}
 	s.chip = h.chip
 	h.srv = httptest.NewServer(s)
 	t.Cleanup(func() {
@@ -628,7 +629,7 @@ func TestPasskeysForThePageItselfAndHandoffs(t *testing.T) {
 		t.Error("clientData", cd)
 	}
 	saved := h.store.items[len(h.store.items)-1]
-	if saved.Title != "Demo passkey (bot) · Chrome Relay" || !slices.Contains(saved.Tags, vault.PasskeyTag) || vault.PasskeyOf(saved) == nil || strings.Contains(fmt.Sprint(saved), "private") {
+	if saved.Title != "Demo passkey (bot) · Chrome Relay · Sam's MacBook Pro" || !slices.Contains(saved.Tags, vault.PasskeyTag) || vault.PasskeyOf(saved) == nil || strings.Contains(fmt.Sprint(saved), "private") {
 		t.Error("saved to the vault, no private key:", saved.Title)
 	}
 

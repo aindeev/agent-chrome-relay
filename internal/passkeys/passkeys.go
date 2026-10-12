@@ -87,7 +87,7 @@ func IDs(ds []Descriptor) []string {
 // chip's handle for it (useless on any other Mac). All binary values base64url.
 type Passkey struct {
 	RPID, CredentialID, UserHandle, UserName, PublicKey, KeyHandle string
-	Item, ItemID, Device                                           string
+	Item, ItemID, Device, DeviceID                                 string // Device: the Mac's name; DeviceID: device.ID of the Mac whose chip holds the key
 }
 
 // Credential is the PublicKeyCredential the page gets (rebuilt into real-looking objects by the page shim).
