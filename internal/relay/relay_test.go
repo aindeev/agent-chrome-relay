@@ -46,6 +46,7 @@ type harness struct {
 	store  *memStore
 	person *memPerson
 	chip   *softChip
+	peers  []*peer
 }
 
 func newHarness(t *testing.T) *harness {
@@ -64,7 +65,26 @@ func newHarness(t *testing.T) *harness {
 	s.vault = &vault.Vault{Settings: s.vaultSettings, Person: h.person, Connect: func(context.Context, string) (vault.Store, error) { return h.store, nil }}
 	s.chip = h.chip
 	h.srv = httptest.NewServer(s)
-	t.Cleanup(h.srv.Close)
+	t.Cleanup(func() {
+		// Close doesn't wait for hijacked WebSockets: let their goroutines finish writing the log and audit trail
+		// into home before the test removes it
+		h.mu.Lock()
+		for _, p := range h.peers {
+			p.ws.Close()
+		}
+		h.mu.Unlock()
+		h.srv.Close()
+		for range 200 {
+			s.mu.Lock()
+			idle := len(s.agents) == 0 && len(s.profiles) == 0
+			s.mu.Unlock()
+			if idle {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond)
+	})
 	return h
 }
 
@@ -93,6 +113,9 @@ func (h *harness) dial(path string, header http.Header) *peer {
 		h.t.Fatal(err)
 	}
 	p := &peer{t: h.t, ws: ws, taken: map[int]bool{}, done: make(chan struct{})}
+	h.mu.Lock()
+	h.peers = append(h.peers, p)
+	h.mu.Unlock()
 	go func() {
 		defer close(p.done)
 		for {
