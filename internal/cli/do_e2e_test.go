@@ -47,8 +47,9 @@ const items = ["Gödel's incompleteness theorems", "Gödel numbering", "Kurt Gö
 q.addEventListener('input', () => setTimeout(() => {
   list.innerHTML = '';
   for (const t of items.filter(t => q.value && t.toLowerCase().includes(q.value.toLowerCase().split(' ')[0]))) {
-    const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = t;
-    li.onclick = () => location.href = '/article?t=' + encodeURIComponent(t); list.append(li);
+    const li = document.createElement('li'); li.setAttribute('role', 'option');
+    const a = document.createElement('a'); a.href = '/article?t=' + encodeURIComponent(t); a.textContent = t; // as Wikipedia does
+    li.append(a); list.append(li);
   }
 }, 150));
 </script>`,
@@ -438,6 +439,9 @@ func TestDoSearchSuggestionAndShadowDOM(t *testing.T) {
 	t.Log(out)
 	if code != 0 {
 		t.Fatalf("search: code %d", code)
+	}
+	if strings.Count(out, "click") != 1 || strings.Contains(out, `= "0"`) {
+		t.Error("a suggestion and the link inside it are one choice")
 	}
 	e.open("/shadow")
 	out, code = e.do([]decide.Model{&scripted{pick: func(*decide.Request) (string, string, string) { return "CLICK", "Create", "" }}},
