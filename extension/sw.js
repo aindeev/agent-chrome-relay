@@ -2,7 +2,7 @@
 // agents' DevTools commands in their own background tabs via chrome.debugger. Agent tabs are never
 // activated: they are created inactive and kept in one collapsed "Agents" tab group per window.
 // The relay's port: 9333, or what `chrome-relay setup` wrote to relay.json next to this file (a dev-mode install
-// from a second checkout runs its own relay on another port).
+// from a second checkout runs its own relay on another port; the Web Store's copy has no relay.json).
 const relayPort = (async () => Number((await (await fetch(chrome.runtime.getURL("relay.json"))).json()).port) || 9333)().catch(() => 9333);
 relayPort.then((port) => port !== 9333 && chrome.action.setTitle({ title: `Chrome Relay (dev mode, relay on port ${port})` }));
 let ws = null, email = "";
@@ -79,7 +79,7 @@ async function closeTrackedTab(tabId, detach = false) {
         if (!gone) throw error;
       }
     }
-    agentTabs.delete(tabId); await remember();
+    agentTabs.delete(tabId); await remember(); updateIfIdle();
   } finally { closing.delete(tabId); }
 }
 // Messages to the relay. While the socket is (re)connecting, e.g. right after Chrome restarted this worker,
@@ -115,7 +115,11 @@ async function groupAgentTab(tabId, windowId) {
 
 async function handle(m) {
   if (m.op === "ping") return send({ id: m.id, result: {} });
-  if (m.op === "reload") { send({ id: m.id, result: {} }); return chrome.runtime.reload(); }  // pick up a new version from disk
+  if (m.op === "reload") {   // pick up a new version: from disk, or (the Web Store's copy) from the store
+    send({ id: m.id, result: {} });
+    if (!chrome.runtime.getManifest().update_url) return chrome.runtime.reload();
+    return chrome.runtime.requestUpdateCheck().catch(() => {});   // a new version arrives through onUpdateAvailable
+  }
   try {
     if (m.op === "config") {
       siteAccounts = m.siteAccounts || {}; nativeNotify = !!m.notifier;
@@ -306,7 +310,12 @@ chrome.tabs.onRemoved.addListener(async (tabId) => { await restored;
   // never try to re-activate a closed tab
   for (const [w, t] of lastActive) if (t === tabId) lastActive.delete(w);
   clearHandoff(tabId);
-  if (closing.has(tabId)) return; if (agentTabs.delete(tabId)) send({ detached: { tabId, reason: "closed" } }); });
+  if (closing.has(tabId)) return; if (agentTabs.delete(tabId)) { send({ detached: { tabId, reason: "closed" } }); updateIfIdle(); } });
+// The Web Store's updates: Chrome would wait for this worker to go idle, which an open WebSocket never lets it do.
+// Reloading forgets the agent tabs (session storage is cleared) and drops their debugger, so wait until there are none.
+let updateReady = false;
+function updateIfIdle() { if (updateReady && agentTabs.size === 0) chrome.runtime.reload(); }
+chrome.runtime.onUpdateAvailable?.addListener(() => { updateReady = true; restored.then(updateIfIdle); });
 // The bridge may start later than Chrome: keep trying. Open WebSocket traffic keeps this worker alive.
 chrome.alarms.create("connect", { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(connect);

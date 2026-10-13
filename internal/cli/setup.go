@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aindeev/agent-chrome-relay/internal/relay"
 	"github.com/aindeev/agent-chrome-relay/internal/vault"
 )
 
@@ -221,14 +222,25 @@ func (c *cli) setup() error {
 	if c.Dev {
 		c.printf("Dev mode: agents use `%s url <email>`; this checkout's extension is a second Chrome Relay (its icon's tooltip says dev mode).\n", c.Name)
 	}
-	c.printf(`
-Last step, by hand, in EACH Chrome profile agents should use (nothing installs it for you):
-  1. open chrome://extensions in a window of that profile
+	soon := ""
+	if !c.Dev && !relay.WebStoreLive {
+		soon = " (a Chrome Web Store version is in review: coming soon)"
+	}
+	install := `  1. open chrome://extensions in a window of that profile
   2. turn on Developer mode (top right)
-  3. Load unpacked -> %s
-  4. pin it: the puzzle-piece icon in Chrome's toolbar, then the pin next to Chrome Relay (its badge shows when
+  3. Load unpacked -> ` + c.Ext + `
+  4.`
+	if !c.Dev && relay.WebStoreLive {
+		install = `  1. install Chrome Relay from the Chrome Web Store: ` + relay.WebStoreURL() + `
+     (or this checkout's own copy instead, never both: chrome://extensions -> Developer mode -> Load unpacked
+     -> ` + c.Ext + `)
+  2.`
+	}
+	c.printf(`
+Last step, by hand, in EACH Chrome profile agents should use (nothing installs it for you)%s:
+%s pin it: the puzzle-piece icon in Chrome's toolbar, then the pin next to Chrome Relay (its badge shows when
      an agent needs you)
-Then run `+"`%s doctor`, and `%s notify test` to allow Chrome Relay's notifications"+".\n", c.Ext, c.Name, c.Name)
+Then run `+"`%s doctor`, and `%s notify test` to allow Chrome Relay's notifications"+".\n", soon, install, c.Name, c.Name)
 	c.setupDecider()
 	return nil
 }

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Zips the extension for the Chrome Web Store: ./package-extension -> chrome-relay-extension-<version>.zip
+# Upload it at https://chrome.google.com/webstore/devconsole (Chrome Relay -> Package -> Upload new package).
+# The version in extension/manifest.json must be higher than the store's.
+set -euo pipefail
+cd "$(dirname "$0")"
+version=$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' extension/manifest.json)
+[ -n "$version" ] || { echo "package-extension: no version in extension/manifest.json" >&2; exit 1; }
+out="chrome-relay-extension-$version.zip"
+rm -f "$out"
+# relay.json is this checkout's own (setup writes it); the store's copy always dials the normal relay
+(cd extension && zip -qrX "../$out" . -x relay.json '.*' '*/.*')
+echo "$out"
+unzip -l "$out" | sed 1,3d | sed '$d' | sed '$d' | awk '{print "  " $4}'

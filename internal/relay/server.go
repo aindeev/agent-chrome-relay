@@ -70,6 +70,7 @@ type profile struct {
 	seq     int
 	client  string
 	prof    string
+	ext     string // the extension's ID: the Web Store's or an unpacked copy's
 	stop    context.CancelFunc
 }
 
@@ -299,9 +300,21 @@ func (s *Server) vaultSettings() vault.Settings {
 	return out
 }
 
-// allowedExtensionIDs: Chrome derives an unpacked extension's ID from its folder; setup records this checkout's.
+// WebStoreID is Chrome Relay's ID in the Chrome Web Store (unlisted): the same on every Mac, and only the store's
+// copy can have it.
+const WebStoreID = "mdglmmedlbkjphgolcejpphnbclkfnom"
+
+// WebStoreLive: the store has published it. Until then setup, doctor and the docs install the unpacked copy, and
+// call the store's "coming soon"; the relay accepts the store's ID either way, so installs work the day it's out.
+const WebStoreLive = false
+
+// WebStoreURL is where people install it.
+func WebStoreURL() string { return "https://chromewebstore.google.com/detail/" + WebStoreID }
+
+// allowedExtensionIDs: the Web Store's copy, and unpacked copies. Chrome derives an unpacked extension's ID from its
+// folder; setup records this checkout's.
 func (s *Server) allowedExtensionIDs() []string {
-	var ids []string
+	ids := []string{WebStoreID}
 	if l, ok := s.config()["extensionIds"].([]any); ok {
 		for _, x := range l {
 			if id, ok := x.(string); ok {
@@ -569,11 +582,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case p == "/versions":
 		s.mu.Lock()
 		chans := map[string]chan extReply{}
+		exts := map[string]string{}
 		for k, pr := range s.profiles {
 			chans[k] = s.extSend(pr, map[string]any{"op": "version"})
+			exts[k] = pr.ext
 		}
 		s.mu.Unlock()
-		out := map[string]string{}
+		type running struct {
+			Version  string `json:"version"`
+			ID       string `json:"id"`
+			WebStore bool   `json:"webStore"`
+		}
+		out := map[string]running{}
 		for k, ch := range chans {
 			v := "0.1.0"
 			select {
@@ -584,7 +604,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			case <-time.After(2 * time.Second):
 			}
-			out[k] = v
+			out[k] = running{v, exts[k], exts[k] == WebStoreID}
 		}
 		js(out)
 	case p == "/vault" && authed: // what agents may know: titles, websites, usernames; never values
@@ -719,6 +739,11 @@ func (s *Server) acceptExtension(c *conn, r *http.Request, prof string, port, se
 	if prev := s.profiles[prof]; prev != nil && prev.conn.open() {
 		if prev.client != client {
 			s.mu.Unlock()
+			if prev.ext != m[1] { // most likely the Web Store's copy and an unpacked one, side by side in one profile
+				s.log("refused a second Chrome Relay extension claiming", prof, "("+m[1]+"; connected:", prev.ext+")")
+				c.close(4009, "another copy of Chrome Relay is already connected as "+prof+": keep only one in chrome://extensions")
+				return
+			}
 			s.log("refused a second Chrome profile claiming", prof)
 			c.close(4009, "another Chrome profile is already connected as "+prof)
 			return
@@ -744,7 +769,7 @@ func (s *Server) acceptExtension(c *conn, r *http.Request, prof string, port, se
 	}
 	s.last[prof] = client
 	ctx, stop := context.WithCancel(context.Background())
-	p := &profile{conn: c, pending: map[int]chan extReply{}, seq: seq, client: client, prof: prof, stop: stop}
+	p := &profile{conn: c, pending: map[int]chan extReply{}, seq: seq, client: client, prof: prof, ext: m[1], stop: stop}
 	s.profiles[prof] = p
 	s.log("extension connected for", prof)
 	config := func() {

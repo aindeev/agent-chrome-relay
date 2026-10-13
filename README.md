@@ -14,10 +14,25 @@
 
 
 Lets your coding agents (Claude Code, Codex, Cursor, Paseo) use **your everyday Chrome**, with your real
-logins, from the command line, **in background tabs**: nothing takes focus, no dialogs, ~0.15s per command.
+logins, from the command line, **in background tabs**: nothing takes focus, no dialogs.
+
+Agents hand over **a whole goal in one command**, and Chrome Relay carries it out, checking every step:
 
 ```bash
-agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com/
+agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com/team/invite
+chrome-relay do "Invite the new teammate as an admin" \
+  --data "Email=ada@example.com" --data "Role=Admin" --until "text:Invitation sent"
+```
+
+It fills what the agent names, replays what worked on that site before, asks a fast decision model (TypeSafe's
+Jev, or Claude Haiku through your own Claude Code) only for real choices, and hands back anything it isn't sure of.
+In a real Chrome with Jev: a 7-step form in **2.5 s**, **1.2 s** replayed, where an agent clicking step by step
+takes about 3 s per action. See [`chrome-relay do`](#whole-goals-in-one-command-chrome-relay-do) and
+[the approach](https://agent-chrome-relay.aindeev.com/approach.html).
+
+Step by step works too, at ~0.15 s per command:
+
+```bash
 agent-browser snapshot -i          # the page's buttons, links and fields, each with a ref like @e5
 agent-browser click @e5
 agent-browser close
@@ -30,14 +45,19 @@ the iPhone app, Chrome Relay Approve, is in App Store review: both are coming so
 extension from your clone and build the iPhone app with Xcode. Signing in with a password manager works with
 **1Password only** for now.
 
-**The core** is background tabs with your logins, Google sign-in hops and an audit trail. **Everything else is
-optional** and off until you turn it on: signing in with 1Password (passwords, 2-step codes, passkeys) and
-Secure Enclave passkeys. See [What's optional](#whats-optional).
+**The core** is background tabs with your logins, `chrome-relay do`, Google sign-in hops and an audit trail.
+**Everything else is optional** and off until you turn it on: signing in with 1Password (passwords, 2-step codes,
+passkeys), Secure Enclave passkeys, approving from your iPhone, and a TypeSafe key for the fastest decider. See
+[What's optional](#whats-optional).
 
 ## How it works
 
 ```
-agent-browser (CLI) ──ws──▶ relay (127.0.0.1:9333, LaunchAgent) ──ws──▶ Chrome Relay extension ──chrome.debugger──▶ agent tab
+agent-browser (CLI) ──ws──────────────┐
+                                      ├──▶ relay (127.0.0.1:9333, LaunchAgent) ──ws──▶ Chrome Relay extension ──chrome.debugger──▶ agent tab
+chrome-relay do ──http /driver────────┘         ▲
+   │                                            └── reads the page and acts, in that agent's own tabs only
+   └── decides: saved flows → the agent's data → Jev or Haiku (Claude Code) → hand back to the agent
 ```
 
 - **Extension** (`extension/`, MV3, one per Chrome profile you load it in): opens each agent tab **inactive**
@@ -47,7 +67,7 @@ agent-browser (CLI) ──ws──▶ relay (127.0.0.1:9333, LaunchAgent) ──
 - **`chrome-relay`**: one Go program, **built and signed on your own Mac** (`./build`). As a background service
   (`chrome-relay serve`) it is the relay: a DevTools endpoint per agent, where each agent sees and controls only
   the tabs it opened and commands that could raise or focus the browser are swallowed. It is also the CLI
-  (setup, the connection URL, diagnostics, audit trail), and the optional 1Password vault and passkeys, whose
+  (setup, the connection URL, `do`, diagnostics, audit trail), and the optional 1Password vault and passkeys, whose
   Secure Enclave and Touch ID code (`internal/macos`, Swift) is linked into the same signed binary when Xcode's
   command line tools are installed.
 
@@ -83,10 +103,12 @@ several, pick one with `./build --identity "<name>"`; it's remembered. `chrome-r
 you have.
 
 Then, **in each Chrome profile agents should use**: open `chrome://extensions`, turn on **Developer mode**,
-**Load unpacked**, pick the `extension` folder of your clone, and **pin** it (puzzle-piece icon → pin) so you see its badge. Check with `chrome-relay doctor`.
+**Load unpacked**, pick the `extension` folder of your clone, and **pin** it (puzzle-piece icon → pin) so you see its
+badge. Check with `chrome-relay doctor`. A Chrome Web Store version is in review: once it's out, you can install it
+from there instead (never both in one profile), and Chrome keeps it up to date.
 
 After `git pull`: `./build && chrome-relay update` (rebuilds, restarts the relay, reloads the extension in every
-profile).
+profile; the Web Store's copy checks the store instead).
 To remove: `chrome-relay uninstall`, then remove the extension in each profile.
 
 ## Telling your agents
@@ -117,19 +139,44 @@ Each step is the cheapest thing that works:
 2. **The agent's data.** A `--data` key that names a field (`Email` → "E-mail address") fills it, picks the
    dropdown option or ticks the box, no model involved. Values can be `op://` references: the relay types them
    from 1Password as it does for agent-browser.
-3. **A fast decision model** for the rest: TypeSafe's Jev (~0.15 s a step) if you saved a key, else Claude Haiku
-   through your own Claude Code (~1–1.5 s a step, on your Claude plan). It picks from a shortlist of the page's
-   controls and from the agent's data only: it never invents text. The decider sees the shortlist, up to 1,500
-   characters of the page's visible text and the `--data` values (never `op://` references or what they hold).
+3. **A fast decision model** for the rest: TypeSafe's Jev (~0.15 s a step) if you saved a key
+   (`pbpaste | chrome-relay decider jev`), else Claude Haiku through your own Claude Code (~1–1.5 s a step, on your
+   Claude plan). It picks from a shortlist of the page's controls and from the agent's data only: it never invents
+   text. The decider sees the shortlist, up to 1,500 characters of the page's visible text and the `--data` values
+   (never `op://` references or what they hold).
+4. **Back to the agent** (exit code 2), with what it did, the page it's on and the elements it was choosing
+   between, whenever it isn't sure: a low-confidence decision, a field with no value, a click on a consequential
+   button the goal doesn't name (delete, send, pay, deploy, authorize, ...; `--allow <verb>` permits it), a covered
+   button, going in circles, leaving the site it started on, `--until` not met. "Done" is only trusted when
+   `--until` holds.
 
 Before every action the relay checks the element is still the one decided on, enabled, on screen and not
-covered; after it, it waits for the page to settle (events, not polling) and reads back what changed. Anything
-it isn't sure of comes back to the agent (exit code 2) with what it did, the page it's on and the elements it
-was choosing between: a low-confidence decision, a field with no value, a click on a consequential button the
-goal doesn't name (delete, send, pay, deploy, ...; `--allow <verb>` permits it), a covered button, going in
-circles, `--until` not met. "Done" is only trusted when `--until` holds.
+covered (open shadow roots included); after it, it waits for the page to settle (events, not polling) and reads
+back what changed. That's what makes a step reliable without the agent looking again.
 
-Why it works this way, and how the deciders compare: [the approach](https://agent-chrome-relay.aindeev.com/approach.html).
+**Why this way.** The browser isn't the slow part: a command through the relay takes ~15–20 ms and a driven step
+~10 ms, while real agents took a median 2.8 s between actions (p90 17 s), thinking. So `do` removes model round
+trips rather than browser time. Measured in a real Chrome with Jev:
+
+| Goal | How | Time |
+|---|---|---|
+| Fill and submit a 7-step order form | 3 fields from `--data`, 4 Jev decisions, the result checked | 2.5 s |
+| The same goal, other data | replayed as a flow, no model | 1.2 s |
+| Open a Wikipedia article through its search suggestions | 2 Jev decisions | 2.0 s |
+
+**Which decider.** Next-action accuracy on 23 live steps / 150 Mind2Web steps, and the median time per decision
+from a Mac:
+
+| Decider | Live | Mind2Web | Per decision |
+|---|---|---|---|
+| TypeSafe Jev 1.13 | 91% | 67% | 0.15 s |
+| Claude Haiku through Claude Code | 96% | 65% | 1.3–1.6 s |
+| Cloudflare Clef (27B), Workers AI | 83% | 67% | 0.53 s |
+| Gemini 3.8 Flash | 96% | 82% | 1.9 s |
+| Local models under 1B | 9–30% | 14–19% | 0.2–0.5 s |
+
+Jev is the default when you have a key, Haiku through Claude Code otherwise; small local models aren't accurate
+enough yet. The method, caveats and the full table: [the approach](https://agent-chrome-relay.aindeev.com/approach.html).
 
 Which decider runs: `chrome-relay decider` (and `doctor`). Every step is in the audit trail as `do click`,
 `do fill` (the field, never the text), with `do start`/`do end` around the run.
@@ -144,10 +191,13 @@ Two checks on every agent connection:
    relay looks the process up (`lsof`, `ps`) and checks the markers those apps set in their child processes
    (`CLAUDECODE`, `CODEX_*`, `CURSOR_*`, `PASEO_AGENT_ID`), then its parent processes.
 
-Connections that carry a browser `Origin` header (a web page) are refused even with the secret. Only **this
-checkout's extension** may connect as the extension: Chrome derives an unpacked extension's ID from its folder,
-`setup` records that ID in `~/.chrome-relay/config.json`, the relay checks the connection's
-`Origin: chrome-extension://<id>` (which pages cannot fake), and the connecting process must be Chrome.
+Connections that carry a browser `Origin` header (a web page) are refused even with the secret. Only **Chrome
+Relay's extension** may connect as the extension: **this checkout's** unpacked copy, or the Web Store's copy once it's
+published (its ID is the store's, which no other extension can have) (for the unpacked one, Chrome derives the ID from its folder;
+`setup` records it in `~/.chrome-relay/config.json`). The relay checks the connection's
+`Origin: chrome-extension://<id>` (which pages cannot fake), and the connecting process must be Chrome. Trusting the
+store's copy means trusting its releases: each is `./package-extension` of a commit in this repo, and Google reviews
+it before it ships. Load your clone's copy instead if you'd rather trust only code you pulled.
 
 This keeps other local tools, web pages and accidents out. It is not a boundary against malware already
 running as you, which could read the secret and fake the markers.
@@ -356,6 +406,13 @@ node --test test/push-relay.test.mjs    # the push relay (push-relay/)
 
 Logs: `chrome-relay logs` (`~/.chrome-relay/relay.log`). Testing extension changes: edit `extension/`, then
 `chrome-relay update`. `CHROME_RELAY_HOME` and `CHROME_RELAY_PORT` override the data folder and port.
+
+**Releasing the extension** to the Chrome Web Store (unlisted, published by Alexey Indeev): raise `version` in
+`extension/manifest.json`, `./package-extension`, and upload the zip in the
+[developer dashboard](https://chrome.google.com/webstore/devconsole) (Chrome Relay → Package → Upload new package →
+Submit for review). Installs update on their own a few hours after it's approved. The listing text, permission
+justifications and images are in [`store/`](store/). Keep the extension's protocol compatible both ways: an install's
+relay and its store extension are updated separately, and `doctor` only flags an extension newer than the relay.
 
 ## About the author
 
