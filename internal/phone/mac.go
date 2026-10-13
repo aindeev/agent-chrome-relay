@@ -61,7 +61,7 @@ func SaveAPNs(instance string, a *APNs) error {
 	return macos.KeychainSet(keychainService, apnsAccount(instance), b)
 }
 
-// LoadAPNs: the APNs key, or nil when there is none (notifications then go through ntfy).
+// LoadAPNs: this Mac's own APNs key, or nil when there is none (the push relay then wakes the phone).
 func LoadAPNs(instance string) *APNs {
 	b, err := macos.KeychainGet(keychainService, apnsAccount(instance))
 	if err != nil {
@@ -74,13 +74,24 @@ func LoadAPNs(instance string) *APNs {
 	return &a
 }
 
-// ForgetAPNs removes the APNs key: notifications go back to ntfy.
+// ForgetAPNs removes the APNs key: the push relay wakes the phone again.
 func ForgetAPNs(instance string) error {
 	return macos.KeychainDelete(keychainService, apnsAccount(instance))
 }
 
-// Ask is how the Mac reaches the phone: the latest push address (saved when it changed), and Apple push when
-// there is an APNs key.
+// pusher: this Mac's own APNs key if it has one, else the push relay (nil: neither, notifications go through ntfy).
+func pusher(instance string) Pusher {
+	if a := LoadAPNs(instance); a != nil {
+		return a
+	}
+	if r := PushRelay(); r != nil {
+		return r
+	}
+	return nil
+}
+
+// Ask is how the Mac reaches the phone: the latest push address (saved when it changed), and Apple push through
+// this Mac's APNs key or the push relay.
 func Ask(ctx context.Context, instance string, p *Pairing, d Details, ttl time.Duration) error {
 	t := Ntfy{Server: p.Server}
 	refresh, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -88,7 +99,7 @@ func Ask(ctx context.Context, instance string, p *Pairing, d Details, ttl time.D
 		Save(instance, p)
 	}
 	cancel()
-	return p.Approve(ctx, t, LoadAPNs(instance), MacName(), d, ttl)
+	return p.Approve(ctx, t, pusher(instance), MacName(), d, ttl)
 }
 
 // MacName is how the phone (and 1Password) name this Mac: its name in System Settings > General > About.

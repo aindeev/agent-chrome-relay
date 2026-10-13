@@ -312,9 +312,9 @@ func (p *Pairing) Refresh(ctx context.Context, t Transport) bool {
 }
 
 // Approve asks the phone and waits for its signed answer. The context ends the wait (someone approved at the Mac
-// instead, or the relay gave up). With push (an APNs key, and a phone that gave its push address), Apple wakes
-// the phone; otherwise ntfy's "<topic>-n" carries the notification.
-func (p *Pairing) Approve(ctx context.Context, t Transport, push *APNs, mac string, d Details, ttl time.Duration) error {
+// instead, or the relay gave up). With push (this Mac's APNs key or the push relay, and a phone that gave its push
+// address), Apple wakes the phone; otherwise, or if that fails, ntfy's "<topic>-n" carries the notification.
+func (p *Pairing) Approve(ctx context.Context, t Transport, push Pusher, mac string, d Details, ttl time.Duration) error {
 	id := make([]byte, 16)
 	rand.Read(id)
 	now := time.Now().UTC().Truncate(time.Second)
