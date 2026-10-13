@@ -12,10 +12,10 @@ extension Store {
     let args = Self.demoArgs
     guard !args.isEmpty else { return }
     demo = true
-    let mac = Mac(name: "MacBook Pro", server: "https://ntfy.sh", topic: "demo", relayKey: Data(),
+    let mac = Mac(name: "MacBook Pro", server: "https://chrome-relay-push.aindeev.workers.dev", topic: "demo", relayKey: Data(),
                   paired: Calendar.current.date(byAdding: .day, value: -3, to: Date())!)
     if args.contains("-demoPair") {
-      offer = PairOffer(server: "https://ntfy.sh", topic: "demo-pair", name: "MacBook Pro", relayKey: Data(), secret: Data())
+      offer = PairOffer(server: "https://chrome-relay-push.aindeev.workers.dev", topic: "demo-pair", name: "MacBook Pro", relayKey: Data(), secret: Data())
       return
     }
     macs = [mac]
@@ -29,7 +29,7 @@ extension Store {
                what: "password", result: .denied),
       LogEntry(time: now.addingTimeInterval(-3_600), mac: "MacBook Pro", agent: "Claude Code (my-repo)", site: "accounts.google.com",
                what: "passkey as bot@acme.com", result: .approved),
-      LogEntry(time: now.addingTimeInterval(-90_000), mac: "MacBook Pro", site: "ntfy.sh", result: .paired),
+      LogEntry(time: now.addingTimeInterval(-90_000), mac: "MacBook Pro", site: "chrome-relay-push.aindeev.workers.dev", result: .paired),
     ]
     if args.contains("-demoIdle") { return }
     func request(_ id: String, _ agent: String, _ site: String, _ what: String, age: TimeInterval) -> Pending {
