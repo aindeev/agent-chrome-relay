@@ -25,6 +25,11 @@ agent-browser close
 
 It's opt-in: nothing installs the extension for you, and it only runs on Macs whose owner set it up.
 
+**Status.** Today you build Chrome Relay from source (below). The Chrome extension is in Chrome Web Store review and
+the iPhone app, Chrome Relay Approve, is in App Store review: both are coming soon, and until then you load the
+extension from your clone and build the iPhone app with Xcode. Signing in with a password manager works with
+**1Password only** for now.
+
 **The core** is background tabs with your logins, Google sign-in hops and an audit trail. **Everything else is
 optional** and off until you turn it on: signing in with 1Password (passwords, 2-step codes, passkeys) and
 Secure Enclave passkeys. See [What's optional](#whats-optional).
