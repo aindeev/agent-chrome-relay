@@ -54,3 +54,88 @@ test("says what Apple said", async () => {
   globalThis.fetch = async () => { throw new Error("network"); };
   assert.equal((await wake({ token, topic: "dev.example.approve" })).status, 502);
 });
+
+// ---- messages: the part of ntfy's protocol the Mac and the iPhone app use
+import { Topic, sinceMs } from "../push-relay/worker.mjs";
+
+// stand-ins for Durable Object storage and the namespace that routes a topic name to its object
+function fakeNamespace() {
+  const objects = new Map();
+  const storage = () => {
+    const m = new Map();
+    return {
+      alarm: 0,
+      async put(k, v) { m.set(k, structuredClone(v)); },
+      async list({ prefix }) { return new Map([...m].filter(([k]) => k.startsWith(prefix)).sort(([a], [b]) => (a < b ? -1 : 1))); },
+      async delete(keys) { for (const k of [].concat(keys)) m.delete(k); },
+      async setAlarm(t) { this.alarm = t; },
+    };
+  };
+  return {
+    objects,
+    idFromName: (name) => name,
+    get(name) {
+      if (!objects.has(name)) objects.set(name, new Topic({ storage: storage() }));
+      return objects.get(name);
+    },
+  };
+}
+const topicA = "cr" + "a".repeat(26), topicB = "cr" + "b".repeat(26);
+const lines = async (res) => (await res.text()).split("\n").filter(Boolean).map((l) => JSON.parse(l));
+
+test("carries messages between the Mac and the phone, as ntfy does", async () => {
+  const e = { ...env, TOPIC: fakeNamespace() };
+  const call = (method, path, body) => worker.fetch(new Request("https://relay.example" + path, { method, body }), e);
+  const posted = await call("POST", `/${topicA}-req`, "sealed-1");
+  assert.equal(posted.status, 200, "the app treats 200 as published");
+  await call("POST", `/${topicA}-req`, "sealed-2");
+  await call("POST", `/${topicB}-req`, "someone else's");
+
+  const got = await lines(await call("GET", `/${topicA}-req/json?poll=1&since=10m`));
+  assert.deepEqual(got.map((m) => [m.event, m.message, m.topic]), [["message", "sealed-1", `${topicA}-req`], ["message", "sealed-2", `${topicA}-req`]],
+    "oldest first, only this topic's");
+  assert.equal((await lines(await call("GET", `/${topicA}-req/json?poll=1&since=all`))).length, 2);
+  assert.equal((await lines(await call("GET", `/${topicA}-req/json?poll=1`))).length, 0, "no since: only what comes next");
+  assert.equal((await lines(await call("GET", `/${topicA}-res/json?poll=1&since=all`))).length, 0, "another topic of the same pairing is separate");
+
+  assert.equal((await call("POST", `/${topicA}-req`, "x".repeat(17 * 1024))).status, 413);
+  assert.equal((await call("GET", "/short/json?poll=1")).status, 404, "a guessable name is not a topic");
+  assert.equal((await call("POST", `/${topicA}-req/json`, "x")).status, 404);
+  const limited = { ...e, LIMIT: { limit: async ({ key }) => ({ success: !key.startsWith("t:") }) } };
+  assert.equal((await worker.fetch(new Request(`https://relay.example/${topicA}-req`, { method: "POST", body: "x" }), limited)).status, 429);
+});
+
+test("streams new messages to a waiting Mac", async () => {
+  const e = { ...env, TOPIC: fakeNamespace() };
+  await worker.fetch(new Request(`https://relay.example/${topicA}-res`, { method: "POST", body: "earlier" }), e);
+  const since = Math.floor(Date.now() / 1000) - 5;
+  const stream = await worker.fetch(new Request(`https://relay.example/${topicA}-res/json?since=${since}`), e);
+  const reader = stream.body.getReader(), dec = new TextDecoder();
+  let text = "";
+  const until = async (n) => { while (text.split("\n").filter(Boolean).length < n) text += dec.decode((await reader.read()).value); return text.split("\n").filter(Boolean).map((l) => JSON.parse(l)); };
+  assert.deepEqual((await until(2)).map((m) => m.event + ":" + (m.message || "")), ["open:", "message:earlier"]);
+  await worker.fetch(new Request(`https://relay.example/${topicA}-res`, { method: "POST", body: "the answer" }), e);
+  assert.equal((await until(3))[2].message, "the answer", "delivered as it is published");
+  await reader.cancel();
+});
+
+test("keeps messages 12 hours, and at most 50 a topic", async () => {
+  const ns = fakeNamespace(), e = { ...env, TOPIC: ns };
+  const post = (body) => worker.fetch(new Request(`https://relay.example/${topicA}-dev`, { method: "POST", body }), e);
+  const real = Date.now;
+  try {
+    const t0 = real();
+    Date.now = () => t0;
+    await post("push address");
+    Date.now = () => t0 + 11 * 3600 * 1000;
+    assert.equal((await lines(await worker.fetch(new Request(`https://relay.example/${topicA}-dev/json?poll=1&since=all`), e))).length, 1, "still there for the Mac's next request");
+    Date.now = () => t0 + 13 * 3600 * 1000;
+    assert.equal((await lines(await worker.fetch(new Request(`https://relay.example/${topicA}-dev/json?poll=1&since=all`), e))).length, 0, "gone after 12 hours");
+    await ns.get(`${topicA}-dev`).alarm();
+    assert.equal((await ns.get(`${topicA}-dev`).state.storage.list({ prefix: "m:" })).size, 0, "and deleted");
+    for (let i = 0; i < 55; i++) { Date.now = () => t0 + 14 * 3600 * 1000 + i; await post("m" + i); }
+    const kept = await lines(await worker.fetch(new Request(`https://relay.example/${topicA}-dev/json?poll=1&since=all`), e));
+    assert.deepEqual([kept.length, kept[0].message, kept[49].message], [50, "m5", "m54"]);
+  } finally { Date.now = real; }
+  assert.deepEqual([sinceMs("all", 1e6), sinceMs("10m", 1e6), sinceMs("30s", 1e6), sinceMs("1700000000", 1e6), sinceMs(null, 1e6)], [0, 4e5, 97e4, 17e11, 1e6 + 1]);
+});

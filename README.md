@@ -288,16 +288,17 @@ shows a QR code; scan it with the iPhone's Camera and open it in *Chrome Relay A
 installed with `./ios/build`, or sent to TestFlight with `./ios/release` so others install it from there). From then on every approval goes to Touch ID here and to the iPhone at once, and
 the first answer wins. The iPhone shows the Mac, the agent and what it asks, and approves with Face ID: its key
 for that lives in the iPhone's Secure Enclave, and the Mac checks the signature against the key it paired with,
-so nothing in between can approve. Requests and answers travel through [ntfy](https://ntfy.sh) (or your own
-ntfy server, `--server`), encrypted to the phone.
+so nothing in between can approve.
 
-**How the phone gets woken.** Only Apple can put a notification on a locked iPhone, and it accepts a push for an
-app only when it is signed with that app's developer key. So that not every Mac needs the key, a small
-[push relay](push-relay/README.md) (a Cloudflare Worker) holds it: the Mac sends the relay the phone's push
-address, and the relay asks Apple to show *"An agent is waiting for your approval."* It sees nothing else, keeps
-nothing, and can't approve anything. `chrome-relay phone` shows what is in use; your own key (`chrome-relay phone
-push --key …`) takes its place if you import one, `CHROME_RELAY_PUSH_RELAY=off` turns the relay off, and without
-either the ntfy iPhone app can notify you (`chrome-relay phone` says which topic).
+**What sits between the Mac and the phone.** One small [relay](push-relay/README.md) (a Cloudflare Worker), for
+two things the devices can't do directly. It carries the messages: neither device can accept a connection from the
+other, so each posts sealed messages there and fetches the other's; the relay holds ciphertext for up to 12 hours
+and can't open it. And it wakes the phone: only Apple can put a notification on a locked iPhone, and it accepts a
+push for an app only when signed with that app's developer key, which the relay holds so that not every Mac has to;
+it shows a fixed *"An agent is waiting for your approval."* The relay can't approve anything, and you can do
+without it: `chrome-relay phone pair --server` takes any [ntfy](https://ntfy.sh) server, `chrome-relay phone push
+--key …` uses your own Apple key, and `CHROME_RELAY_PUSH_RELAY=off` turns the relay off. `chrome-relay phone`
+shows what is in use.
 
 The relay talks to 1Password in-process (no `op` command, so the token never sits in another process's
 environment), keeps the token in memory only while it runs, and is built with the hardened runtime, so no
