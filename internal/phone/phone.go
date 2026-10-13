@@ -7,9 +7,11 @@
 // approval is a request encrypted to the phone, naming the agent and what it wants, and an answer signed by the
 // phone's Face ID key over that exact request. The relay checks the signature; the transport only carries bytes.
 //
-// The transport is ntfy (https://ntfy.sh, or your own server): three topics under a random name only the Mac and
-// the phone know, "<topic>-pair", "<topic>-req" and "<topic>-res", plus "<topic>-n" for a notification without
-// details. Anyone who learns the name can read ciphertext, or drop or delay answers; never approve.
+// The transport is Chrome Relay's relay (push-relay/, a Cloudflare Worker) or any ntfy server (`phone pair
+// --server`): both speak the same small protocol. Topics under a random name only the Mac and the phone know:
+// "<topic>-pair", "<topic>-req", "<topic>-res", "<topic>-dev" (the phone's push address), plus "<topic>-n" for a
+// notification without details on ntfy. Anyone who learns the name can read ciphertext, or drop or delay answers;
+// never approve.
 package phone
 
 import (
@@ -334,7 +336,8 @@ func (p *Pairing) Approve(ctx context.Context, t Transport, push Pusher, mac str
 	}
 	// details stay in the encrypted request; the notification only says there is one
 	note := "An agent on " + mac + " is waiting for your approval."
-	if push == nil || p.Push == nil || push.Push(ctx, *p.Push, "Chrome Relay", note, r.ID) != nil {
+	// no push, or it failed: an ntfy server can still notify through its own iPhone app (the relay has none)
+	if (push == nil || p.Push == nil || push.Push(ctx, *p.Push, "Chrome Relay", note, r.ID) != nil) && !IsRelay(p.Server) {
 		t.Publish(ctx, p.Topic+"-n", []byte(note), map[string]string{
 			"Title": "Chrome Relay", "Click": "chromerelay://open", "Priority": "high", "Tags": "key"})
 	}

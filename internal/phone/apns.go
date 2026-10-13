@@ -168,10 +168,27 @@ func (a *APNs) Push(ctx context.Context, d Device, title, body, id string) error
 	return nil
 }
 
-// DefaultPushRelay is the push relay for the Chrome Relay Approve app from TestFlight (push-relay/, push-relay/README.md).
-// It only serves that app; a copy of the app you built yourself needs your own key (`chrome-relay phone push`) or
-// your own relay.
+// DefaultPushRelay is Chrome Relay's relay (push-relay/, push-relay/README.md): it wakes the Chrome Relay Approve
+// app from TestFlight, and carries the sealed messages of pairings made without --server. It wakes only that app; a
+// copy of the app you built yourself needs your own key (`chrome-relay phone push`) or your own relay.
 const DefaultPushRelay = "https://chrome-relay-push.aindeev.workers.dev"
+
+// MessageServer: where a new pairing's messages go unless `phone pair --server` names another: the relay this Mac
+// uses, or ntfy.sh when the relay is turned off.
+func MessageServer() string {
+	if r := PushRelay(); r != nil {
+		return r.URL
+	}
+	return "https://ntfy.sh"
+}
+
+// IsRelay: server is a Chrome Relay relay rather than an ntfy server (which has an iPhone app of its own that can
+// show notifications).
+func IsRelay(server string) bool {
+	server = strings.TrimRight(server, "/")
+	r := PushRelay()
+	return server == DefaultPushRelay || (r != nil && server == r.URL)
+}
 
 // Relay asks a push relay (push-relay/worker.mjs) to wake the phone, for Macs without the app's APNs key. Apple
 // only delivers pushes signed with the app developer's key, so the relay holds it; it gets the phone's push address
