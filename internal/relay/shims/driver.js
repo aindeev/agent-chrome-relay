@@ -52,7 +52,7 @@
   };
   const editable = (e, r) => !e.readOnly && e.getAttribute('aria-readonly') !== 'true' &&
     (['textbox', 'searchbox', 'spinbutton', 'password'].includes(r) || (r === 'combobox' && ['INPUT', 'TEXTAREA'].includes(e.tagName)));
-  const valueOf = e => e.type === 'password' ? '' : 'value' in e && e.tagName !== 'BUTTON' ? String(e.value) :
+  const valueOf = e => e.type === 'password' ? '' : ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.tagName) ? String(e.value) :
     e.isContentEditable || e.getAttribute('role') === 'combobox' ? (e.innerText || '').trim().slice(0, 200) : '';
   const labelOf = (e, r) => name(e) || (r === 'password' ? 'Password' : r);
   D.describe = e => { const r = role(e); return { role: r, label: labelOf(e, r) }; };
@@ -63,8 +63,21 @@
     for (const h of root.querySelectorAll('*')) if (h.shadowRoot && budget.n-- > 0) walk(h.shadowRoot, budget);
   };
   walk(document, { n: 2000 });
+  // one control, one entry: a link inside a suggestion with the same label (a common autocomplete markup) is the
+  // same choice, and listing it twice splits a decision model's confidence between the two
+  const candidates = new Set(found);
+  const same = new Map();
+  const dup = e => {
+    if (!e.matches('a[href],[role="link"],[role="button"],button')) return false;
+    for (let x = up(e), i = 0; x && i < 6; x = up(x), i++) if (candidates.has(x) && !x.matches('input,textarea,select,form')) {
+      const outer = same.get(x) ?? same.set(x, name(x)).get(x);
+      return outer === name(e);
+    }
+    return false;
+  };
   const vh = innerHeight, vw = innerWidth, elements = [];
   for (const e of found) {
+    if (dup(e)) continue;
     if (skip(e) || !visible(e) || e.matches(':disabled') || closest(e, '[aria-disabled="true"]')) continue;
     const r = e.getBoundingClientRect(), rname = role(e);
     if (!rname || r.width <= 0 || r.height <= 0) continue;
