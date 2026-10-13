@@ -3,7 +3,8 @@
 #
 # Needs Xcode and xcodegen (`brew install xcodegen`). Signs with your Apple Development team: $CHROME_RELAY_IOS_TEAM,
 # or the team of your Apple Development certificate if there is just one. Apple push needs the paid Apple Developer
-# Program; with a free Apple ID add --no-push (notifications then come through the ntfy app, and the app stops
+# Program; with a free Apple ID add --no-push (no notifications then, unless you pair through an ntfy server and use
+# its iPhone app: `chrome-relay phone pair --server https://ntfy.sh`; and the app stops
 # opening after 7 days: run this again). Connect the iPhone by cable or the same Wi-Fi, with Developer Mode on.
 set -euo pipefail
 cd "$(dirname "$0")"

@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,6 +33,11 @@ type APNs struct {
 	jwtAt  time.Time
 	Client *http.Client              `json:"-"`
 	Base   func(sandbox bool) string `json:"-"` // tests
+}
+
+// Pusher wakes a phone through Apple push: this Mac's own key (APNs), or the push relay that holds the app's (Relay).
+type Pusher interface {
+	Push(ctx context.Context, d Device, title, body, id string) error
 }
 
 // Device is where a phone receives pushes: its token, its app (the topic) and Apple's sandbox or production.
@@ -157,6 +164,79 @@ func (a *APNs) Push(ctx context.Context, d Device, title, body, id string) error
 			e.Reason = res.Status
 		}
 		return fmt.Errorf("Apple push: %s", e.Reason)
+	}
+	return nil
+}
+
+// DefaultPushRelay is Chrome Relay's relay (push-relay/, push-relay/README.md): it wakes the Chrome Relay Approve
+// app from TestFlight, and carries the sealed messages of pairings made without --server. It wakes only that app; a
+// copy of the app you built yourself needs your own key (`chrome-relay phone push`) or your own relay.
+const DefaultPushRelay = "https://chrome-relay-push.aindeev.workers.dev"
+
+// MessageServer: where a new pairing's messages go unless `phone pair --server` names another: the relay this Mac
+// uses, or ntfy.sh when the relay is turned off.
+func MessageServer() string {
+	if r := PushRelay(); r != nil {
+		return r.URL
+	}
+	return "https://ntfy.sh"
+}
+
+// IsRelay: server is a Chrome Relay relay rather than an ntfy server (which has an iPhone app of its own that can
+// show notifications).
+func IsRelay(server string) bool {
+	server = strings.TrimRight(server, "/")
+	r := PushRelay()
+	return server == DefaultPushRelay || (r != nil && server == r.URL)
+}
+
+// Relay asks a push relay (push-relay/worker.mjs) to wake the phone, for Macs without the app's APNs key. Apple
+// only delivers pushes signed with the app developer's key, so the relay holds it; it gets the phone's push address
+// and nothing else: the notification's text is the relay's own, and the request stays in the encrypted channel.
+type Relay struct {
+	URL    string
+	Client *http.Client
+}
+
+// PushRelay: the relay this Mac uses, or nil. $CHROME_RELAY_PUSH_RELAY names another one, or "off" for none.
+func PushRelay() *Relay {
+	u := DefaultPushRelay
+	if v, ok := os.LookupEnv("CHROME_RELAY_PUSH_RELAY"); ok {
+		u = strings.TrimSpace(v)
+	}
+	if u == "" || strings.EqualFold(u, "off") {
+		return nil
+	}
+	return &Relay{URL: strings.TrimRight(u, "/")}
+}
+
+// Push sends the phone's push address and the request id; title and body are not sent (the relay has its own).
+func (r *Relay) Push(ctx context.Context, d Device, _, _, id string) error {
+	body, _ := json.Marshal(map[string]any{"token": d.Token, "topic": d.Topic, "sandbox": d.Sandbox, "request": id})
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.URL+"/wake", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("content-type", "application/json")
+	c := r.Client
+	if c == nil {
+		c = http.DefaultClient
+	}
+	res, err := c.Do(req)
+	if err != nil {
+		return fmt.Errorf("push relay: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		var e struct{ Reason string }
+		b, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		json.Unmarshal(b, &e)
+		if e.Reason == "" {
+			e.Reason = res.Status
+		}
+		return fmt.Errorf("push relay: %s", e.Reason)
 	}
 	return nil
 }

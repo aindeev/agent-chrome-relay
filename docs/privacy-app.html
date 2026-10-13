@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy: Chrome Relay Approve (iPhone app)</title>
+  <meta name="description" content="What Chrome Relay and the Chrome Relay Approve iPhone app collect (nothing about you), what the relay between your Mac and iPhone handles, and how long.">
+  <link rel="canonical" href="https://agent-chrome-relay.aindeev.com/privacy-app.html">
+  <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
+  <style>
+    body { margin: 0; color: #0d0f12; background: #fff; font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 720px; margin: 0 auto; padding: 56px 24px 96px; }
+    h1 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -.01em; }
+    h2 { font-size: 19px; margin: 36px 0 8px; }
+    p, li { color: #2b2f34; }
+    .meta { color: #6b7178; margin: 0 0 28px; }
+    code { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; background: #f3f4f6; padding: 1px 5px; border-radius: 4px; }
+    a { color: #0369a1; }
+    .home { display: inline-flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; font-weight: 600; margin-bottom: 36px; }
+  </style>
+</head>
+<body>
+<main>
+  <a class="home" href="./"><img src="icon.png" width="28" height="28" alt=""> Chrome Relay</a>
+  <h1>Privacy</h1>
+  <p class="meta">The Chrome Relay Approve iPhone app, and the relay it uses. Last updated October 12, 2026. (The Chrome
+  extension's policy is <a href="privacy.html">here</a>.)</p>
+
+  <p>Chrome Relay lets your AI coding agents use your Chrome on your Mac. Chrome Relay Approve is its iPhone app: it
+  lets you approve, with Face ID, what an agent asks for when you are away from the Mac. Both are open source
+  (<a href="https://github.com/aindeev/agent-chrome-relay">github.com/aindeev/agent-chrome-relay</a>), so everything
+  below can be checked in the code.</p>
+
+  <h2>In short</h2>
+  <ul>
+    <li>We don't collect personal data. There are no accounts, no analytics, no advertising and no tracking.</li>
+    <li>What agents ask you to approve (which agent, which site, which account) is encrypted on your Mac so that only
+      your paired iPhone can read it, and the other way round for your answer.</li>
+    <li>A small relay passes those encrypted messages between your Mac and iPhone and wakes the app through Apple's
+      push service. It can't read them, and it deletes them within 12 hours.</li>
+  </ul>
+
+  <h2>On your Mac</h2>
+  <p>Chrome Relay runs on your Mac and keeps its data there: its settings, an audit trail of what agents did in your
+  browser (in <code>~/.chrome-relay</code>), and its keys and tokens in your Mac's Keychain. If you connect
+  1Password, logins are read from the vaults you choose, on your Mac, and typed into the sites they belong to; they
+  are never sent anywhere else. None of this is sent to us.</p>
+
+  <h2>On your iPhone</h2>
+  <p>Chrome Relay Approve keeps on your iPhone: the Macs you paired it with, their keys, and a log of your last 100
+  approvals. Its signing key is created in your iPhone's Secure Enclave and never leaves it. The app asks for Face ID
+  to sign an approval, and for notifications so it can tell you when an agent is waiting. It has no account, no
+  analytics and no third-party code.</p>
+
+  <h2>The relay</h2>
+  <p>Your Mac and iPhone can't connect to each other directly, so they meet at a relay: a small service we run on
+  Cloudflare Workers (<code>chrome-relay-push.aindeev.workers.dev</code>). It handles:</p>
+  <ul>
+    <li><strong>Encrypted messages</strong> between a paired Mac and iPhone: the pairing handshake, requests, answers,
+      and your iPhone's push address. They are encrypted end to end (P-256 key agreement, AES-GCM) with keys only the
+      two devices have; the relay stores the ciphertext, under a random name only the two devices know, until the
+      other side fetches it, for at most 12 hours, then deletes it.</li>
+    <li><strong>Waking your iPhone.</strong> When an agent is waiting, your Mac sends the relay your iPhone's push
+      address, and the relay asks Apple's push service to show a fixed notification ("An agent is waiting for your
+      approval"). The relay keeps nothing about this.</li>
+  </ul>
+  <p>Like any web service, the relay and Cloudflare see the IP address and time of each request; Cloudflare may keep
+  these in its logs under <a href="https://www.cloudflare.com/privacypolicy/">its privacy policy</a>. We don't use
+  them to identify you. Apple delivers the notification under
+  <a href="https://www.apple.com/legal/privacy/">its privacy policy</a>.</p>
+  <p>You don't have to use our relay: pairing with <code>chrome-relay phone pair --server</code> uses any
+  <a href="https://ntfy.sh">ntfy</a> server instead (your own, for example), and you can run your own copy of the
+  relay from the repository.</p>
+
+  <h2>What we can't do</h2>
+  <p>We can't see what your agents ask for or which sites they use, can't read your 1Password logins, and can't
+  approve anything: an approval is a signature from your iPhone's Secure Enclave, which your Mac checks.</p>
+
+  <h2>Children</h2>
+  <p>Chrome Relay is a developer tool and isn't directed at children.</p>
+
+  <h2>Changes and contact</h2>
+  <p>If this policy changes, this page and its date will change with it; the history is in the repository. Questions:
+  open an issue at <a href="https://github.com/aindeev/agent-chrome-relay/issues">github.com/aindeev/agent-chrome-relay/issues</a>
+  or write to <a href="mailto:alexey.indeev@gmail.com">alexey.indeev@gmail.com</a>.</p>
+</main>
+</body>
+</html>

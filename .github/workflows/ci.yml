@@ -52,4 +52,4 @@ jobs:
           node --check extension/sw.js
           node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json', 'utf8'))"
       - name: Tests (tab cleanup, Agents tab group)
-        run: node --test test/extension-*.test.mjs
+        run: node --test test/extension-*.test.mjs test/push-relay.test.mjs

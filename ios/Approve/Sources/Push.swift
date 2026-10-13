@@ -11,6 +11,9 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
   func application(_ app: UIApplication, didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
     let center = UNUserNotificationCenter.current()
     center.delegate = self
+    #if DEBUG
+    if !Store.demoArgs.isEmpty { return true } // the demo (screenshots) asks for nothing
+    #endif
     center.requestAuthorization(options: [.alert, .sound, .badge]) { ok, _ in
       if ok { DispatchQueue.main.async { app.registerForRemoteNotifications() } }
     }

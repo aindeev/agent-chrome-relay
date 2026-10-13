@@ -9,7 +9,7 @@ settings:
     DEVELOPMENT_TEAM: ${CHROME_RELAY_IOS_TEAM}
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1"
+    MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   Approve:
@@ -20,6 +20,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ${CHROME_RELAY_IOS_BUNDLE_ID}
         PRODUCT_NAME: Chrome Relay Approve
+        TARGETED_DEVICE_FAMILY: "1" # iPhone only: it approves with Face ID on the phone you carry
         INFOPLIST_KEY_CFBundleDisplayName: Relay Approve
         INFOPLIST_KEY_NSFaceIDUsageDescription: Face ID approves your agents' Chrome Relay requests, and signs each approval.
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
@@ -31,6 +32,9 @@ targets:
     info:
       path: Approve/Info.plist
       properties:
+        # export compliance: the app only uses Apple's own encryption (CryptoKit, HTTPS), so App Store Connect stops
+        # asking about each build
+        ITSAppUsesNonExemptEncryption: false
         CFBundleURLTypes:
           - CFBundleURLName: chromerelay
             CFBundleURLSchemes: [chromerelay]

@@ -1,0 +1,24 @@
+# Chrome Relay's relay: wakes the iPhone app and carries its encrypted messages (push-relay/README.md). Deploy: `npx wrangler deploy` in this folder, after
+#   npx wrangler secret put APNS_KEY < AuthKey_<KEYID>.p8
+#   npx wrangler secret put APNS_KEY_ID        (the 10 characters in the file's name)
+#   npx wrangler secret put APNS_TEAM_ID       (Apple Developer > Membership details)
+#   npx wrangler secret put TOPICS             (the app's bundle ID; several: comma-separated)
+name = "chrome-relay-push"
+main = "worker.mjs"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+# at most 20 wake-ups a minute per phone, and 20 messages a minute per topic
+[[ratelimits]]
+name = "LIMIT"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
+# one small object per topic holds its messages (ciphertext) for up to 12 hours
+[[durable_objects.bindings]]
+name = "TOPIC"
+class_name = "Topic"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Topic"]

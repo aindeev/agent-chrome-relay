@@ -23,7 +23,7 @@ import (
 //	chrome-relay phone forget           unpair it
 //	chrome-relay phone push --key <AuthKey_KEYID.p8> --team-id <TEAMID> [--key-id <KEYID>]
 //	                                    notify the phone through Apple push, with your own APNs key
-//	chrome-relay phone push forget      back to ntfy
+//	chrome-relay phone push forget      back to the push relay
 func (c *cli) phone() error {
 	if !macos.Linked {
 		return errors.New("this chrome-relay was built without Xcode's command line tools, so it has no iPhone approvals: " +
@@ -42,17 +42,24 @@ func (c *cli) phone() error {
 			c.printf("Paired: %s, since %s, through %s.\nApprovals go to Touch ID here and to the iPhone at once; the first answer wins.\n",
 				p.Device, p.Paired.Local().Format("2006-01-02 15:04"), p.Server)
 		}
-		a := phone.LoadAPNs(inst)
-		if a != nil {
-			c.printf("Apple push: key %s, team %s.\n", a.KeyID, a.TeamID)
-		} else {
-			c.println("Apple push: not set up; notifications go through ntfy.")
+		a, relay := phone.LoadAPNs(inst), phone.PushRelay()
+		switch {
+		case a != nil:
+			c.printf("Apple push: with this Mac's own key (%s, team %s).\n", a.KeyID, a.TeamID)
+		case relay != nil:
+			c.printf("Apple push: through the push relay %s, which holds the app's key and sees only the phone's push address.\n", relay.URL)
+		default:
+			c.println("Apple push: off (no key on this Mac, and the push relay is turned off).")
 		}
-		if p != nil && (a == nil || p.Push == nil) {
-			if a != nil {
-				c.println("The paired iPhone hasn't sent its push address yet; until it does, notifications go through ntfy.")
+		if p != nil && ((a == nil && relay == nil) || p.Push == nil) {
+			if p.Push == nil && (a != nil || relay != nil) {
+				c.println("The paired iPhone hasn't sent its push address yet (open the app once, and allow its notifications).")
 			}
-			c.printf("Notifications: in the ntfy iPhone app, subscribe to %s on %s.\n", p.Topic+"-n", p.Server)
+			if phone.IsRelay(p.Server) {
+				c.println("Until Apple push works, open the app yourself when an agent says it is waiting.")
+			} else {
+				c.printf("Notifications meanwhile: in the ntfy iPhone app, subscribe to %s on %s.\n", p.Topic+"-n", p.Server)
+			}
 		}
 		return nil
 	case "push":
@@ -60,7 +67,7 @@ func (c *cli) phone() error {
 			if err := phone.ForgetAPNs(inst); err != nil {
 				return err
 			}
-			c.println("Removed the APNs key: notifications go through ntfy.")
+			c.println("Removed this Mac's APNs key: the push relay wakes the phone again.")
 			return nil
 		}
 		a, path, err := parsePush(c.args[3:], os.ReadFile)
@@ -74,7 +81,7 @@ func (c *cli) phone() error {
 		c.printf("The .p8 file is still at %s: keep a copy in 1Password (it can't be downloaded again), then delete it from Downloads.\n", path)
 		return nil
 	case "pair":
-		server := "https://ntfy.sh"
+		server := phone.MessageServer() // Chrome Relay's relay; --server names an ntfy server instead
 		for i := 3; i < len(c.args); i++ {
 			if v, ok := strings.CutPrefix(c.args[i], "--server="); ok {
 				server = v
@@ -108,7 +115,11 @@ func (c *cli) phone() error {
 			return err
 		}
 		c.printf("Paired with %s. Agents' approvals now go to Touch ID here and Face ID there; the first answer wins.\n", p.Device)
-		c.printf("For notifications, subscribe to %s in the ntfy iPhone app (server %s). Try it: `%s phone test`\n", p.Topic+"-n", server, c.Name)
+		if phone.IsRelay(server) {
+			c.printf("Try it: `%s phone test`\n", c.Name)
+		} else {
+			c.printf("For notifications without Apple push, subscribe to %s in the ntfy iPhone app (server %s). Try it: `%s phone test`\n", p.Topic+"-n", server, c.Name)
+		}
 		return nil
 	case "test":
 		p, err := phone.Load(inst)
@@ -137,7 +148,7 @@ func (c *cli) phone() error {
 		c.println("Unpaired: approvals are Touch ID on this Mac only. Delete the Mac in the iPhone app too.")
 		return nil
 	}
-	return fmt.Errorf("usage: %s phone [pair [--server <ntfy server>] | test | forget | push --key <AuthKey_KEYID.p8> --team-id <TEAMID> | push forget]", c.Name)
+	return fmt.Errorf("usage: %s phone [pair [--server <ntfy server or relay>] | test | forget | push --key <AuthKey_KEYID.p8> --team-id <TEAMID> | push forget]", c.Name)
 }
 
 // parsePush reads `phone push` arguments (--key, --key-id, --team-id, as `--flag v` or `--flag=v`) and the key
