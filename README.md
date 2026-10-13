@@ -289,8 +289,15 @@ installed with `./ios/build`, or sent to TestFlight with `./ios/release` so othe
 the first answer wins. The iPhone shows the Mac, the agent and what it asks, and approves with Face ID: its key
 for that lives in the iPhone's Secure Enclave, and the Mac checks the signature against the key it paired with,
 so nothing in between can approve. Requests and answers travel through [ntfy](https://ntfy.sh) (or your own
-ntfy server, `--server`), encrypted to the phone; the ntfy iPhone app can notify you (`chrome-relay phone` says
-which topic).
+ntfy server, `--server`), encrypted to the phone.
+
+**How the phone gets woken.** Only Apple can put a notification on a locked iPhone, and it accepts a push for an
+app only when it is signed with that app's developer key. So that not every Mac needs the key, a small
+[push relay](push-relay/README.md) (a Cloudflare Worker) holds it: the Mac sends the relay the phone's push
+address, and the relay asks Apple to show *"An agent is waiting for your approval."* It sees nothing else, keeps
+nothing, and can't approve anything. `chrome-relay phone` shows what is in use; your own key (`chrome-relay phone
+push --key …`) takes its place if you import one, `CHROME_RELAY_PUSH_RELAY=off` turns the relay off, and without
+either the ntfy iPhone app can notify you (`chrome-relay phone` says which topic).
 
 The relay talks to 1Password in-process (no `op` command, so the token never sits in another process's
 environment), keeps the token in memory only while it runs, and is built with the hardened runtime, so no
@@ -336,6 +343,7 @@ CGO_ENABLED=0 go test ./...             # the core-only build (also what runs on
 CHROME_RELAY_E2E=1 go test ./internal/cli -run TestDo   # `chrome-relay do` against real pages in a throwaway headless Chrome
                                         # (+ CHROME_RELAY_E2E_CLAUDE=1, or CHROME_RELAY_E2E_JEV=1 with TYPESAFE_API_KEY: real deciders)
 node --test test/extension-*.test.mjs   # the extension's service worker
+node --test test/push-relay.test.mjs    # the push relay (push-relay/)
 ```
 
 Logs: `chrome-relay logs` (`~/.chrome-relay/relay.log`). Testing extension changes: edit `extension/`, then

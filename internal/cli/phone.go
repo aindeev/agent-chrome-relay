@@ -23,7 +23,7 @@ import (
 //	chrome-relay phone forget           unpair it
 //	chrome-relay phone push --key <AuthKey_KEYID.p8> --team-id <TEAMID> [--key-id <KEYID>]
 //	                                    notify the phone through Apple push, with your own APNs key
-//	chrome-relay phone push forget      back to ntfy
+//	chrome-relay phone push forget      back to the push relay
 func (c *cli) phone() error {
 	if !macos.Linked {
 		return errors.New("this chrome-relay was built without Xcode's command line tools, so it has no iPhone approvals: " +
@@ -42,14 +42,17 @@ func (c *cli) phone() error {
 			c.printf("Paired: %s, since %s, through %s.\nApprovals go to Touch ID here and to the iPhone at once; the first answer wins.\n",
 				p.Device, p.Paired.Local().Format("2006-01-02 15:04"), p.Server)
 		}
-		a := phone.LoadAPNs(inst)
-		if a != nil {
-			c.printf("Apple push: key %s, team %s.\n", a.KeyID, a.TeamID)
-		} else {
-			c.println("Apple push: not set up; notifications go through ntfy.")
+		a, relay := phone.LoadAPNs(inst), phone.PushRelay()
+		switch {
+		case a != nil:
+			c.printf("Apple push: with this Mac's own key (%s, team %s).\n", a.KeyID, a.TeamID)
+		case relay != nil:
+			c.printf("Apple push: through the push relay %s, which holds the app's key and sees only the phone's push address.\n", relay.URL)
+		default:
+			c.println("Apple push: off; notifications go through ntfy.")
 		}
-		if p != nil && (a == nil || p.Push == nil) {
-			if a != nil {
+		if p != nil && ((a == nil && relay == nil) || p.Push == nil) {
+			if p.Push == nil && (a != nil || relay != nil) {
 				c.println("The paired iPhone hasn't sent its push address yet; until it does, notifications go through ntfy.")
 			}
 			c.printf("Notifications: in the ntfy iPhone app, subscribe to %s on %s.\n", p.Topic+"-n", p.Server)
@@ -60,7 +63,7 @@ func (c *cli) phone() error {
 			if err := phone.ForgetAPNs(inst); err != nil {
 				return err
 			}
-			c.println("Removed the APNs key: notifications go through ntfy.")
+			c.println("Removed this Mac's APNs key: the push relay wakes the phone again.")
 			return nil
 		}
 		a, path, err := parsePush(c.args[3:], os.ReadFile)
