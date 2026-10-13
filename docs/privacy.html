@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy: Chrome Relay</title>
+  <meta name="description" content="What Chrome Relay's Chrome extension does with your data: it talks only to the Chrome Relay service on your own Mac.">
+  <link rel="canonical" href="https://agent-chrome-relay.aindeev.com/privacy.html">
+  <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
+  <style>
+    body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Inter", sans-serif; color: #111; max-width: 720px; margin: 0 auto; padding: 48px 24px 80px; }
+    h1 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; }
+    h2 { font-size: 19px; margin: 34px 0 6px; }
+    .fine { color: #666; font-size: 14px; margin: 0 0 28px; }
+    code { font: 14px "JetBrains Mono", ui-monospace, monospace; background: #f3f3f1; padding: 1px 4px; }
+    a { color: inherit; }
+  </style>
+</head>
+<body>
+<p><a href="./">← Chrome Relay</a></p>
+<h1>Privacy</h1>
+<p class="fine">Chrome Relay's Chrome extension. Last updated October 12, 2026.</p>
+
+<p>Chrome Relay lets AI coding agents on your Mac (Claude Code, Codex, Cursor, Paseo) work in background tabs of your
+Chrome. It has two parts: this extension, and a small service you build and run on your own Mac from
+<a href="https://github.com/aindeev/agent-chrome-relay">the open-source repo</a>. The extension talks to that service
+and nothing else.</p>
+
+<h2>What the extension handles</h2>
+<ul>
+  <li><strong>Your Chrome profile's email address</strong> (<code>identity.email</code>), so the service on your Mac
+    knows which profile is which when an agent asks for one.</li>
+  <li><strong>The pages in the tabs agents open</strong>: the extension opens them, and passes the agents' DevTools
+    commands and the pages' replies (page content, URLs, screenshots) between Chrome and the service.</li>
+  <li><strong>Tab and tab-group IDs</strong> of the agents' tabs, kept in Chrome's own extension storage so it can close
+    them later. It never reads or touches your other tabs' content.</li>
+</ul>
+
+<h2>Where it goes</h2>
+<p>Only to the Chrome Relay service on your own Mac, over a connection to <code>127.0.0.1</code> that never leaves the
+machine. The extension sends nothing to the developer or to anyone else: no analytics, no tracking, no remote servers,
+and no code loaded from the internet. The service on your Mac keeps an audit trail of what agents did in
+<code>~/.chrome-relay</code>, which stays on your Mac (text typed into pages is recorded only as its length).</p>
+<p>What the agents themselves do with what they read is up to the agent apps you run and their own policies. If you turn
+on the optional decision model for <code>chrome-relay do</code>, the service on your Mac sends the text of agent tabs to
+the provider you chose (Anthropic through your own Claude Code, or TypeSafe), as the README explains.</p>
+
+<h2>What is not done with it</h2>
+<p>Your data is not sold, not transferred to third parties, not used for advertising, and not used to determine
+creditworthiness or for lending. It is not used for anything but carrying out what your agents ask for in your
+Chrome.</p>
+
+<h2>Removing it</h2>
+<p>Remove the extension in <code>chrome://extensions</code>; its stored tab IDs go with it. <code>chrome-relay
+uninstall</code> removes the service and its files from your Mac.</p>
+
+<h2>Contact</h2>
+<p>Alexey Indeev, through <a href="https://github.com/aindeev/agent-chrome-relay/issues">the repo's GitHub issues</a>.</p>
+</body>
+</html>
