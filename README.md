@@ -124,6 +124,8 @@ was choosing between: a low-confidence decision, a field with no value, a click 
 goal doesn't name (delete, send, pay, deploy, ...; `--allow <verb>` permits it), a covered button, going in
 circles, `--until` not met. "Done" is only trusted when `--until` holds.
 
+Why it works this way, and how the deciders compare: [the approach](https://agent-chrome-relay.aindeev.com/approach.html).
+
 Which decider runs: `chrome-relay decider` (and `doctor`). Every step is in the audit trail as `do click`,
 `do fill` (the field, never the text), with `do start`/`do end` around the run.
 
