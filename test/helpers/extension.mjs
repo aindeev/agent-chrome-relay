@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-export async function extensionFixture({ remove, get, group, windowIds = [1], saved = {}, tabs = [7] } = {}) {
-  const messages = [], persisted = { ...saved };
+export async function extensionFixture({ remove, get, group, windowIds = [1], saved = {}, tabs = [7], manifest = {} } = {}) {
+  const messages = [], persisted = { ...saved }, runtime = { reloads: 0, updateChecks: 0 };
   const live = new Set(tabs);
   const groups = new Map(), groupCalls = [];
   let nextTab = 100, nextGroup = 10, windowIndex = 0;
@@ -12,7 +12,8 @@ export async function extensionFixture({ remove, get, group, windowIds = [1], sa
     storage: { session: storage, local: storage },
     identity: { getProfileUserInfo: async () => ({ email: 'fixture@example.test' }) },
     alarms: { create() {}, onAlarm: event() },
-    runtime: { onStartup: event(), onInstalled: event(), reload() {}, getManifest: () => ({ version: 'test' }) },
+    runtime: { onStartup: event(), onInstalled: event(), onUpdateAvailable: event(), reload() { runtime.reloads++; },
+      requestUpdateCheck: async () => { runtime.updateChecks++; return { status: 'no_update' }; }, getManifest: () => ({ version: 'test', ...manifest }) },
     debugger: { onEvent: event(), onDetach: event(), detach: async () => {}, attach: async () => {} },
     windows: { getLastFocused: async () => ({ id: windowIds[windowIndex++ % windowIds.length] }) },
     tabGroups: { get: async (id) => { if (!groups.has(id)) throw new Error('No group'); return groups.get(id); },
@@ -38,7 +39,8 @@ export async function extensionFixture({ remove, get, group, windowIds = [1], sa
   const source = fs.readFileSync(new URL('../../extension/sw.js', import.meta.url), 'utf8');
   vm.runInContext(source + '\n globalThis.fixture = { handle, connect, closeAgentTabs, agentTabs };', context);
   await context.fixture.connect();
-  return { ...context.fixture, messages, persisted, live, sockets, groups, groupCalls,
+  return { ...context.fixture, messages, persisted, live, sockets, groups, groupCalls, runtime,
+    updateAvailable: () => Promise.all(chrome.runtime.onUpdateAvailable.listeners.map((listener) => listener())),
     created: async (tab) => { live.add(tab.id); await Promise.all(chrome.tabs.onCreated.listeners.map((listener) => listener(tab))); },
     advance: (ms) => { timeOffset += ms; } };
 }

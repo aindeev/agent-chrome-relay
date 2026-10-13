@@ -306,3 +306,14 @@ func TestBaseDomain(t *testing.T) {
 		}
 	}
 }
+
+func TestCompareVersions(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want int
+	}{{"0.10.0", "0.9.4", 1}, {"0.9.4", "0.10.0", -1}, {"1.0", "1.0.0", 0}, {"1.0.1", "1.0", 1}} {
+		if got := compareVersions(c.a, c.b); got != c.want {
+			t.Errorf("compareVersions(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}

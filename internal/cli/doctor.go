@@ -1,17 +1,21 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/aindeev/agent-chrome-relay/internal/macos"
+	"github.com/aindeev/agent-chrome-relay/internal/relay"
 	"github.com/aindeev/agent-chrome-relay/internal/vault"
 )
 
@@ -47,19 +51,25 @@ func (c *cli) doctor() error {
 	check(exec.Command("pgrep", "-x", "Google Chrome").Run() == nil, "Chrome running", "Chrome is not running: open it")
 	if c.up() {
 		s, _ := c.relayStatus()
-		check(len(s.Profiles) > 0, "extension connected in: "+strings.Join(s.Profiles, ", "), fmt.Sprintf("extension not connected in any profile: load it unpacked from %s (see `%s setup` output)", c.Ext, c.Name))
+		check(len(s.Profiles) > 0, "extension connected in: "+strings.Join(s.Profiles, ", "), "extension not connected in any profile: "+c.installExtension())
 		disk := manifestVersion(c.Ext)
-		vers := newObject()
-		if body, err := c.getRaw("/versions", 5*time.Second); err == nil {
-			if v, err := parseJSON(body); err == nil {
-				if o, ok := v.(*object); ok {
-					vers = o
-				}
-			}
+		var vers map[string]struct {
+			Version  string
+			WebStore bool
 		}
-		for _, e := range vers.keys {
-			v := pyStr(vers.get(e))
-			check(v == disk, fmt.Sprintf("%s runs the current extension %s", e, disk), fmt.Sprintf("%s runs %s, files are %s: run `%s update`", e, v, disk, c.Name))
+		if body, err := c.getRaw("/versions", 5*time.Second); err == nil {
+			json.Unmarshal(body, &vers)
+		}
+		for _, e := range slices.Sorted(maps.Keys(vers)) {
+			v := vers[e]
+			switch {
+			case !v.WebStore:
+				check(v.Version == disk, fmt.Sprintf("%s runs the current extension %s", e, disk), fmt.Sprintf("%s runs %s, files are %s: run `%s update`", e, v.Version, disk, c.Name))
+			case compareVersions(v.Version, disk) > 0: // the store has a release this checkout doesn't
+				check(false, "", fmt.Sprintf("%s runs the Web Store's extension %s, newer than this checkout (%s): `git pull`, `./build`, then `%s update`", e, v.Version, disk, c.Name))
+			default: // the store updates it on its own, a few hours after a release
+				check(true, fmt.Sprintf("%s runs the Web Store's extension %s", e, v.Version), "")
+			}
 		}
 	}
 	// passkeys and the 1Password token live in the Secure Enclave and the Keychain, trusted only by this signed binary
@@ -133,6 +143,33 @@ func (c *cli) doctor() error {
 func asList(v any) []any {
 	l, _ := v.([]any)
 	return l
+}
+
+// installExtension: how to install the extension in a profile, for messages.
+func (c *cli) installExtension() string {
+	unpacked := "in chrome://extensions turn on Developer mode, then Load unpacked -> " + c.Ext
+	if c.Dev || relay.WebStoreURL() == "" {
+		return unpacked
+	}
+	return "install it from " + relay.WebStoreURL() + " (or, for this checkout's own copy: " + unpacked + "; not both)"
+}
+
+// compareVersions compares dotted versions (1.10.0 > 1.9.4): -1, 0 or 1.
+func compareVersions(a, b string) int {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := range max(len(as), len(bs)) {
+		var x, y int
+		if i < len(as) {
+			x, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			y, _ = strconv.Atoi(bs[i])
+		}
+		if x != y {
+			return cmp.Compare(x, y)
+		}
+	}
+	return 0
 }
 
 func manifestVersion(ext string) string {

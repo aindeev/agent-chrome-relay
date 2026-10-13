@@ -1090,3 +1090,30 @@ func TestAgentsSaveNewLoginsAndOneTimeCodesTheyNeverSee(t *testing.T) {
 		t.Error("audit: saves, no secrets:", string(b))
 	}
 }
+
+// Two copies of the extension in one profile (the Web Store's and an unpacked one): the second is told so, and
+// /versions says which copy each profile runs.
+func TestTwoCopiesOfTheExtension(t *testing.T) {
+	h := newHarness(t)
+	const other = "ponmlkjihgfedcbaponmlkjihgfedcba"
+	os.WriteFile(filepath.Join(h.home, "config.json"), []byte(`{"extensionIds":["`+extID+`","`+other+`"]}`), 0o600)
+	h.extension("me@example.com")
+	h.as(Caller{PID: 99}, true)
+	second := h.dial("/extension?profile=me@example.com&client=another", http.Header{"Origin": {"chrome-extension://" + other}})
+	if code, reason := second.closedWith(); code != 4009 || !strings.Contains(reason, "another copy of Chrome Relay") {
+		t.Error("a second copy in the same profile:", code, reason)
+	}
+	res, err := http.Get(h.srv.URL + "/versions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var v map[string]struct {
+		Version, ID string
+		WebStore    bool
+	}
+	json.NewDecoder(res.Body).Decode(&v)
+	if got := v["me@example.com"]; got.ID != extID || got.WebStore {
+		t.Error("versions:", v)
+	}
+}

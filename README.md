@@ -77,11 +77,17 @@ lists yours; a free one comes with an Apple ID in Xcode → Settings → Account
 several, pick one with `./build --identity "<name>"`; it's remembered. `chrome-relay doctor` says which build
 you have.
 
-Then, **in each Chrome profile agents should use**: open `chrome://extensions`, turn on **Developer mode**,
-**Load unpacked**, pick the `extension` folder of your clone, and **pin** it (puzzle-piece icon → pin) so you see its badge. Check with `chrome-relay doctor`.
+Then, **in each Chrome profile agents should use**: install **[Chrome Relay from the Chrome Web Store](https://chromewebstore.google.com/detail/WEBSTORE_ID)**
+and **pin** it (puzzle-piece icon → pin) so you see its badge. Check with `chrome-relay doctor`.
+The listing is unlisted: it isn't in the store's search, only at that link. Chrome keeps it up to date, and applies an
+update once no agent tab is open.
+
+Prefer your clone's own copy (to read every line that runs, or to change it)? Instead of the store's, never beside it:
+open `chrome://extensions`, turn on **Developer mode**, **Load unpacked**, and pick the `extension` folder of your
+clone. Both copies are the same code; the store's is what `./package-extension` zips from this folder.
 
 After `git pull`: `./build && chrome-relay update` (rebuilds, restarts the relay, reloads the extension in every
-profile).
+profile; the Web Store's copy checks the store instead).
 To remove: `chrome-relay uninstall`, then remove the extension in each profile.
 
 ## Telling your agents
@@ -137,10 +143,13 @@ Two checks on every agent connection:
    relay looks the process up (`lsof`, `ps`) and checks the markers those apps set in their child processes
    (`CLAUDECODE`, `CODEX_*`, `CURSOR_*`, `PASEO_AGENT_ID`), then its parent processes.
 
-Connections that carry a browser `Origin` header (a web page) are refused even with the secret. Only **this
-checkout's extension** may connect as the extension: Chrome derives an unpacked extension's ID from its folder,
-`setup` records that ID in `~/.chrome-relay/config.json`, the relay checks the connection's
-`Origin: chrome-extension://<id>` (which pages cannot fake), and the connecting process must be Chrome.
+Connections that carry a browser `Origin` header (a web page) are refused even with the secret. Only **Chrome
+Relay's extension** may connect as the extension: the Web Store's copy (its ID is the store's, which no other
+extension can have) or **this checkout's** unpacked copy (Chrome derives an unpacked extension's ID from its folder;
+`setup` records it in `~/.chrome-relay/config.json`). The relay checks the connection's
+`Origin: chrome-extension://<id>` (which pages cannot fake), and the connecting process must be Chrome. Trusting the
+store's copy means trusting its releases: each is `./package-extension` of a commit in this repo, and Google reviews
+it before it ships. Load your clone's copy instead if you'd rather trust only code you pulled.
 
 This keeps other local tools, web pages and accidents out. It is not a boundary against malware already
 running as you, which could read the secret and fake the markers.
@@ -340,6 +349,13 @@ node --test test/extension-*.test.mjs   # the extension's service worker
 
 Logs: `chrome-relay logs` (`~/.chrome-relay/relay.log`). Testing extension changes: edit `extension/`, then
 `chrome-relay update`. `CHROME_RELAY_HOME` and `CHROME_RELAY_PORT` override the data folder and port.
+
+**Releasing the extension** to the Chrome Web Store (unlisted, published by Alexey Indeev): raise `version` in
+`extension/manifest.json`, `./package-extension`, and upload the zip in the
+[developer dashboard](https://chrome.google.com/webstore/devconsole) (Chrome Relay → Package → Upload new package →
+Submit for review). Installs update on their own a few hours after it's approved. The listing text, permission
+justifications and images are in [`store/`](store/). Keep the extension's protocol compatible both ways: an install's
+relay and its store extension are updated separately, and `doctor` only flags an extension newer than the relay.
 
 ## About the author
 

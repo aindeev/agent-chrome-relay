@@ -6,3 +6,4 @@ internal/macos/libsecure.a
 /chrome-relay
 /.signing-identity
 /Chrome Relay.app
+/chrome-relay-extension-*.zip
