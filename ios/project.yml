@@ -32,6 +32,9 @@ targets:
     info:
       path: Approve/Info.plist
       properties:
+        # export compliance: the app only uses Apple's own encryption (CryptoKit, HTTPS), so App Store Connect stops
+        # asking about each build
+        ITSAppUsesNonExemptEncryption: false
         CFBundleURLTypes:
           - CFBundleURLName: chromerelay
             CFBundleURLSchemes: [chromerelay]
