@@ -112,6 +112,16 @@ func (c *cli) doctor() error {
 		}
 		check(d.Error == "", fmt.Sprintf("1Password vaults %s: %d items", quoteList(vaults), len(d.Items)), "1Password: "+d.Error)
 	}
+	// what `chrome-relay do` asks when a step needs a decision (optional: without one it fills data and replays flows)
+	_, names := c.deciders("auto")
+	switch names[0] {
+	case "jev":
+		c.printf("  ok   `%s do` decides with TypeSafe's Jev%s\n", c.Name, map[bool]string{true: ", then Haiku through Claude Code", false: ""}[len(names) > 1])
+	case "claude":
+		c.printf("  ok   `%s do` decides with Haiku through your Claude Code (faster with a Jev key: `pbpaste | %s decider jev`)\n", c.Name, c.Name)
+	default:
+		c.printf("  --   `%s do` has no decider: it fills what agents name and replays flows, and hands other steps back (`%s decider`)\n", c.Name, c.Name)
+	}
 	if ok {
 		c.println("all good")
 	} else {

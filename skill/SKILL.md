@@ -19,6 +19,8 @@ agent-browser get text main; agent-browser screenshot shot.png
 agent-browser close                  # ALWAYS when done: closes your tabs
 ```
 
+For anything more than a click or two, use `chrome-relay do "<goal>" --data ... --until ...` (below).
+
 Rules:
 - Pass `--cdp` only on the first command of a session. The URL carries this Mac's secret: never print it into
   logs, PRs, chats or files. Only Claude Code, Codex, Cursor and Paseo processes are accepted.
@@ -34,6 +36,33 @@ Rules:
 - Never use `--auto-connect`, `--cdp 9222`, `--headed`, Playwright attached to their Chrome, computer use or
   AppleScript against Chrome: those take over their screen.
 - Public pages that need no login: a plain headless `agent-browser open <url>` (no `--cdp`) is fine.
+
+## Whole goals in one command: `chrome-relay do`
+
+Once the page is open, hand Chrome Relay the goal instead of clicking step by step. It fills what you name,
+replays what worked on this site before, asks a fast decision model for the rest, and checks every action. It
+usually takes a few seconds where step-by-step takes minutes.
+
+```bash
+chrome-relay do "Invite the new teammate as an admin" \
+  --data "Email=ada@example.com" --data "Role=Admin" --until "text:Invitation sent"
+```
+
+- **Give every value you know as `--data <field label>=<value>`**, keyed by the label the page shows ("Email",
+  "Project name"); it never invents values. Credentials only as `op://` references
+  (`--data "Password=op://<vault>/<item>/password"`), never in the goal text.
+- **Always give `--until`**: what the page shows when it's done (`text:...`, `url:...`, `title:...`,
+  `no-text:...`, `selector:...`). Only then is "done" verified, and only then is the run saved as a flow that
+  repeats it without a model next time.
+- **Exit 0** = done (the output lists every step). **Exit 2** = handed back: it says why, what it did, the page
+  it's on and the elements it was choosing between. Continue from there yourself with agent-browser
+  (`agent-browser snapshot -i`); don't rerun the same `do` hoping for a different result. It hands back
+  on purpose before clicking a consequential button the goal doesn't name (delete, send, pay, deploy, ...): if
+  the person asked for exactly that, rerun with `--allow <verb>`; never `--allow '*'` on your own.
+- One goal per run, in the tab you used last (`--tab <id>` for another). Same `AGENT_BROWSER_SESSION` as the
+  agent-browser commands that opened it.
+- `chrome-relay decider` says what it decides with (Jev, Haiku through Claude Code, or none). Setting a key is the
+  person's job; never run `decider jev` yourself.
 
 ## Signing in with 1Password
 

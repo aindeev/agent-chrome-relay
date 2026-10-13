@@ -229,7 +229,24 @@ Last step, by hand, in EACH Chrome profile agents should use (nothing installs i
   4. pin it: the puzzle-piece icon in Chrome's toolbar, then the pin next to Chrome Relay (its badge shows when
      an agent needs you)
 Then run `+"`%s doctor`, and `%s notify test` to allow Chrome Relay's notifications"+".\n", c.Ext, c.Name, c.Name)
+	c.setupDecider()
 	return nil
+}
+
+// setupDecider: `chrome-relay do` decides steps with Jev if the person gives it a key; without one, with Haiku
+// through their own Claude Code. Setup only says which, and how to change it: it never asks for a key.
+func (c *cli) setupDecider() {
+	if k, _ := jevKey(); k != "" {
+		c.printf("\n`%s do` (agents carry out a whole goal in one command) decides steps with TypeSafe's Jev.\n", c.Name)
+		return
+	}
+	c.printf("\nOptional: `%s do` lets agents carry out a whole goal in one command. For steps that need a decision it uses\n", c.Name)
+	if p := claudePath(); p != "" {
+		c.printf("Haiku through your Claude Code (%s), ~1 s a step. Faster (~0.15 s) with a TypeSafe key for Jev:\n", p)
+	} else {
+		c.printf("TypeSafe's Jev (~0.15 s a step), or Haiku through Claude Code once it's installed. For Jev, a TypeSafe key:\n")
+	}
+	c.printf("  pbpaste | %s decider jev      (stored in your Keychain; page text of agent tabs then goes to TypeSafe)\n", c.Name)
 }
 
 // bootstrap loads the LaunchAgent. Right after a bootout launchd can still be tearing the old one down, so retry

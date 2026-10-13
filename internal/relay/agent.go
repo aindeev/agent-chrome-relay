@@ -47,6 +47,9 @@ type message struct {
 	Method    string          `json:"method"`
 	Params    json.RawMessage `json:"params,omitempty"`
 	SessionID string          `json:"sessionId,omitempty"`
+	// sink, when set, gets the reply instead of the agent's WebSocket: the relay's own driver (driver.go) runs
+	// commands in an agent's tab through the same path as the agent's, vault references and audit included.
+	sink func(key string, v any) `json:"-"`
 }
 
 func (m message) params() map[string]any {
@@ -114,6 +117,8 @@ type Agent struct {
 	blocked              string
 	pageQ                chan pageCall
 	newLogins            map[string]newLogin // ?new references this agent saved: the "confirm password" field gets the same
+	id                   Caller              // who connected: the driver (driver.go) acts for the same agent
+	lastTab              int                 // the tab the agent last sent a command to: the driver's default tab
 }
 
 // newLogin: a password Chrome Relay just made and saved, for the next fields of the same sign-up.
@@ -174,11 +179,15 @@ func (a *Agent) send(v any) {
 		return
 	}
 	b, _ := json.Marshal(v)
-	s := string(b)
+	a.conn.send([]byte(a.mask(string(b))))
+}
+
+// mask hides every vault secret this agent typed, as read back from the page inside JSON.
+func (a *Agent) mask(s string) string {
 	for _, h := range a.hidden {
-		s = strings.ReplaceAll(s, h, "••••••••") // a vault secret this agent had typed, read back from the page
+		s = strings.ReplaceAll(s, h, "••••••••")
 	}
-	a.conn.send([]byte(s))
+	return s
 }
 
 func trunc(s string, n int) string {
@@ -197,6 +206,10 @@ func (a *Agent) hide(secret string) {
 }
 
 func (a *Agent) reply(m message, key string, v any) {
+	if m.sink != nil {
+		m.sink(key, v)
+		return
+	}
 	out := map[string]any{"id": m.ID, key: v}
 	if m.SessionID != "" {
 		out["sessionId"] = m.SessionID
@@ -274,6 +287,9 @@ func (a *Agent) onMessage(m message) {
 		if tab < 0 || !a.tabs[tab] {
 			a.err(m, "unknown session")
 			return
+		}
+		if m.sink == nil {
+			a.lastTab = tab
 		}
 		if child == "" && m.Method == "Runtime.runIfWaitingForDebugger" {
 			a.ok(m, nil)

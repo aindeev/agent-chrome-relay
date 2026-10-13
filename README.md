@@ -92,6 +92,41 @@ repo gets it. Codex, Cursor and others: point them at the same file, e.g. a line
 `<path>/agent-chrome-relay/skill/SKILL.md`."* A repo's `CLAUDE.md`/`AGENTS.md` only needs a
 one-line pointer to the skill.
 
+## Whole goals in one command: `chrome-relay do`
+
+Driving a page one `agent-browser` command at a time costs the agent a model round trip per click: the relay
+answers in ~15 ms, the agent thinks for seconds. `chrome-relay do` lets the agent state the goal once, with the
+values it already knows and how to tell it's done, and Chrome Relay carries it out in the agent's own tab:
+
+```bash
+agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com/team/invite
+chrome-relay do "Invite the new teammate as an admin" \
+  --data "Email=ada@example.com" --data "Role=Admin" --until "text:Invitation sent"
+```
+
+Each step is the cheapest thing that works:
+
+1. **A flow that worked before.** A run that ends with its `--until` checks met is saved per site
+   (`~/.chrome-relay/flows/`, steps and data keys, never values); the same kind of goal there replays at browser
+   speed, with the new data. `chrome-relay flows` lists them.
+2. **The agent's data.** A `--data` key that names a field (`Email` → "E-mail address") fills it, picks the
+   dropdown option or ticks the box, no model involved. Values can be `op://` references: the relay types them
+   from 1Password as it does for agent-browser.
+3. **A fast decision model** for the rest: TypeSafe's Jev (~0.15 s a step) if you saved a key, else Claude Haiku
+   through your own Claude Code (~1–1.5 s a step, on your Claude plan). It picks from a shortlist of the page's
+   controls and from the agent's data only: it never invents text. The decider sees the shortlist, up to 1,500
+   characters of the page's visible text and the `--data` values (never `op://` references or what they hold).
+
+Before every action the relay checks the element is still the one decided on, enabled, on screen and not
+covered; after it, it waits for the page to settle (events, not polling) and reads back what changed. Anything
+it isn't sure of comes back to the agent (exit code 2) with what it did, the page it's on and the elements it
+was choosing between: a low-confidence decision, a field with no value, a click on a consequential button the
+goal doesn't name (delete, send, pay, deploy, ...; `--allow <verb>` permits it), a covered button, going in
+circles, `--until` not met. "Done" is only trusted when `--until` holds.
+
+Which decider runs: `chrome-relay decider` (and `doctor`). Every step is in the audit trail as `do click`,
+`do fill` (the field, never the text), with `do start`/`do end` around the run.
+
 ## Who can drive it
 
 Two checks on every agent connection:
@@ -133,6 +168,7 @@ Nothing below happens unless you set it up, and each part can be turned off agai
 | Approving on your iPhone (Face ID), when away from the Mac | **off** | `chrome-relay phone pair` | `chrome-relay phone forget` |
 | Notifications when an agent needs you (a sign-in, a passkey to approve in 1Password) | on once you allow them | `chrome-relay notify test`, then allow | System Settings > Notifications > Chrome Relay |
 | One approval for several passkey sign-ins | **off** (every signature asks) | `chrome-relay passkeys reuse 120` (1–300 s) | `chrome-relay passkeys reuse off` |
+| A fast decider for `chrome-relay do` (TypeSafe's Jev; page text of agent tabs then goes to TypeSafe) | **off**; Haiku through your Claude Code if it's installed | `pbpaste \| chrome-relay decider jev` | `chrome-relay decider jev forget` |
 
 The notifications come from *Chrome Relay.app*, a small app `./build` makes and `setup` puts in `~/Applications`
 (it needs Xcode's command line tools). It exists because Chrome's own notifications are often switched off in
@@ -297,6 +333,8 @@ go generate ./internal/macos            # the Swift Secure Enclave / Keychain / 
 CGO_LDFLAGS="-L$(xcrun --show-sdk-path)/usr/lib/swift -L$(dirname $(xcrun -f swiftc))/../lib/swift/macosx" \
   go test -race ./...                   # relay, CLI, 1Password fills, passkeys (in-memory 1Password and chip stand in)
 CGO_ENABLED=0 go test ./...             # the core-only build (also what runs on Linux)
+CHROME_RELAY_E2E=1 go test ./internal/cli -run TestDo   # `chrome-relay do` against real pages in a throwaway headless Chrome
+                                        # (+ CHROME_RELAY_E2E_CLAUDE=1, or CHROME_RELAY_E2E_JEV=1 with TYPESAFE_API_KEY: real deciders)
 node --test test/extension-*.test.mjs   # the extension's service worker
 ```
 
@@ -317,4 +355,4 @@ Questions, ideas or bugs: open an [issue](https://github.com/aindeev/agent-chrom
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Code adapted from other projects: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

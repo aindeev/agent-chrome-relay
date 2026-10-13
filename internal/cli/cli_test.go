@@ -297,3 +297,12 @@ func TestPasskeysCommandWritesConfig(t *testing.T) {
 		t.Fatal("config keeps other keys and gains passkeys:", string(b))
 	}
 }
+
+func TestBaseDomain(t *testing.T) {
+	for in, want := range map[string]string{"app.example.com": "example.com", "www.example.com": "example.com", "example.com": "example.com",
+		"shop.example.co.uk": "example.co.uk", "accounts.google.com": "google.com", "127.0.0.1:8080": "0.1", "a.b.github.io": "github.io"} {
+		if got := baseDomain(in); got != want {
+			t.Errorf("baseDomain(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
