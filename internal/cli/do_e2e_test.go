@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -130,13 +131,27 @@ func startChrome(t *testing.T) *cdpClient {
 	if _, err := os.Stat(bin); err != nil {
 		t.Skip("no Chrome at", bin)
 	}
-	dir := t.TempDir()
+	// not t.TempDir(): Chrome's helper processes may still be writing the profile when the test ends
+	dir, err := os.MkdirTemp("", "chrome-relay-e2e-")
+	if err != nil {
+		t.Fatal(err)
+	}
 	cmd := exec.Command(bin, "--headless=new", "--remote-debugging-port=0", "--user-data-dir="+dir, "--no-first-run",
 		"--no-default-browser-check", "--window-size=1200,900", "about:blank")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+	t.Cleanup(func() {
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // Chrome and its helpers
+		cmd.Wait()
+		for range 20 {
+			if os.RemoveAll(dir) == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
 	var lines []string
 	for i := 0; i < 100; i++ {
 		if b, err := os.ReadFile(filepath.Join(dir, "DevToolsActivePort")); err == nil {
