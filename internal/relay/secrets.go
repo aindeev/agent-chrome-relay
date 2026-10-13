@@ -60,11 +60,11 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 		}
 		refuse(fmt.Errorf("%q of %q only goes into a password field, and the focused field is %s", v.Field, v.Item, what))
 	default:
-		if sent := a.cdp(p, t, "Input.insertText", map[string]any{"text": v.Value}); sent.Error != "" {
+		if sent := a.typeText(p, t, el, v.Value); sent.Error != "" {
 			refuse(errors.New(sent.Error))
 			return
 		}
-		a.hide(v.Value) // secrets, and one-time codes too: nothing the agent reads back shows them
+		a.hide(v.Value) // secrets, and one-time codes too: nothing the agent reads back shows them (a code split over boxes shows a digit per box)
 		a.filled[t] = v.Item
 		a.s.audit(a, "1password fill", "tab", t, "item", v.Item, "field", v.Field, "url", u)
 		a.s.log("1password: filled", v.Field, "of", v.Item, "in tab", t)
@@ -77,6 +77,34 @@ type field struct {
 	Frame bool   `json:"frame"`
 	Tag   string `json:"tag"`
 	Type  string `json:"type"`
+	Boxes int    `json:"boxes"` // a code split over one-character inputs: how many, from this one on
+}
+
+// focusBoxExpr focuses (and selects) the n-th of the boxes focused.js found.
+const focusBoxExpr = `(() => { const b = window[Symbol.for("chrome-relay.boxes")], el = b && b[%d]; if (!el) return false; el.focus(); el.select && el.select(); return true; })()`
+
+// typeText types text into the focused field. A code split over one-character boxes (Wagepoint's six boxes
+// for six digits) gets one character per box, each box focused in turn: typed whole, only the first would land.
+func (a *Agent) typeText(p *profile, t int, el *field, text string) extReply {
+	chars := []rune(text)
+	if el == nil || el.Boxes < 2 || len(chars) < 2 || len(chars) > el.Boxes {
+		return a.cdp(p, t, "Input.insertText", map[string]any{"text": text})
+	}
+	for i, c := range chars {
+		if r := a.cdp(p, t, "Runtime.evaluate", map[string]any{"expression": fmt.Sprintf(focusBoxExpr, i), "returnByValue": true}); r.Error != "" {
+			return r
+		}
+		if r := a.cdp(p, t, "Input.insertText", map[string]any{"text": string(c)}); r.Error != "" {
+			return r
+		}
+	}
+	return extReply{}
+}
+
+// codeLike: text that may be a code typed into split boxes (short, no spaces): worth asking what has focus.
+func codeLike(text string) bool {
+	n := len([]rune(text))
+	return n >= 2 && n <= 12 && !strings.ContainsAny(text, " \t\n")
 }
 
 func (a *Agent) focusedField(p *profile, t int) *field {
@@ -158,7 +186,7 @@ func (a *Agent) saveSecret(t int, child string, m message, ref string, r vault.S
 		refuse(errors.New("the page changed while 1Password answered (the secret is saved in 1Password); fill the field again with the plain reference"))
 		return
 	}
-	if sent := a.cdp(p, t, "Input.insertText", map[string]any{"text": v.Value}); sent.Error != "" {
+	if sent := a.typeText(p, t, el, v.Value); sent.Error != "" {
 		refuse(errors.New(sent.Error))
 		return
 	}

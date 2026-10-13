@@ -537,6 +537,22 @@ func TestVaultFillsSecretsAgentsNeverSee(t *testing.T) {
 	if len(h.person.approvals) != 1 {
 		t.Error("one sign-in, one approval:", h.person.approvals)
 	}
+	// a code split over six one-character boxes: one character per box, each focused in turn
+	chrome.mu.Lock()
+	chrome.focused = map[string]any{"tag": "INPUT", "type": "tel", "boxes": 6}
+	chrome.mu.Unlock()
+	cmd("Input.insertText", map[string]any{"text": "op://Agents/GitHub/otp"})
+	if got := typed()[3:]; len(got) != 6 || strings.Join(got, "") != typed()[2] {
+		t.Error("the code goes one digit per box:", got)
+	}
+	cmd("Input.insertText", map[string]any{"text": "AM54RQ"}) // a code the agent read from an email
+	if got := typed()[9:]; strings.Join(got, "") != "AM54RQ" || len(got) != 6 {
+		t.Error("a typed code goes one character per box too:", got)
+	}
+	chrome.mu.Lock()
+	chrome.focused = map[string]any{"tag": "INPUT", "type": "text"}
+	chrome.mu.Unlock()
+	cmd("Input.insertText", map[string]any{"text": "op://Agents/GitHub/username"})
 	chrome.mu.Lock()
 	chrome.focused = map[string]any{"tag": "INPUT", "type": "password"}
 	chrome.mu.Unlock()
@@ -547,7 +563,7 @@ func TestVaultFillsSecretsAgentsNeverSee(t *testing.T) {
 	if !strings.Contains(errMsg(cmd("Input.insertText", map[string]any{"text": "op://Private/GitHub/password"})), `only the vaults "Agents"`) {
 		t.Error("other vaults are refused")
 	}
-	if len(typed()) != 3 {
+	if len(typed()) != 16 {
 		t.Error("nothing typed on refusal")
 	}
 	a.mu.Lock()

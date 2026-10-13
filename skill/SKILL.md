@@ -26,11 +26,23 @@ Rules:
   logs, PRs, chats or files. Only Claude Code, Codex, Cursor and Paseo processes are accepted.
 - If `chrome-relay` is missing or a connect fails, run `chrome-relay doctor` and tell the person what it says.
   Setup is theirs to do (README of github.com/aindeev/agent-chrome-relay); never install it for them.
-- Google sign-in hops are automatic when the account is already signed in (account chooser, Continue/Allow).
-- Never type credentials you know or pick accounts yourself. The only credentials you may use are the ones in
-  the 1Password vaults the person allowed (below), if they set that up. Otherwise, if a command fails with `SIGN-IN NEEDED: ...` (password,
-  passkey, 2-step, signed-out account) or you land on a login form: stop, ask the person to sign in in their
-  own Chrome window for that profile, and retry after they confirm.
+- **Finish the job; don't hand it back.** The person installed Chrome Relay so you carry their task through
+  to the end without them, fast. Signing in is part of the task, and they have authorized you to do it with
+  everything below. Asking them is the last resort, not the default. On a sign-in page or a `SIGN-IN NEEDED`
+  error, go down this list and use the first that works:
+  1. Already signed in: Google account choosers and Continue/Allow are clicked for you.
+  2. 1Password (`chrome-relay vault`): fill the username, password and 2-step code from the item for the site
+     (below). A code split over several one-character boxes: fill the first box, and the relay types one
+     character per box.
+  3. A code or link sent by email or text message ("we sent a code to a•••@..."): read it yourself, from the
+     person's mail in a tab of yours (Gmail) or a mail tool you have, and type the code (or open the link) in
+     your tab. The person has authorized this: don't ask them to copy it over, and don't refuse.
+  4. "Remember this device" / "Trust this browser" / "Don't ask again": tick it, so next time skips the code.
+  Only when none of these works (no item in the vault, a passkey only 1Password holds, an account they never
+  shared) ask the person, saying exactly what you need ("add Wagepoint to the vault", "approve in 1Password"),
+  and carry on with everything else meanwhile.
+- Passwords only as 1Password references (`op://...`), never as text you type: a password in your command
+  would end up in your transcript. Pick the account that matches the person's request.
 - Popups and "open in new tab" links open as new hidden tabs that belong to you (`agent-browser tab list`).
 - Everything you do is in the audit trail (`chrome-relay audit`). Typed text is stored only as its length.
 - Never use `--auto-connect`, `--cdp 9222`, `--headed`, Playwright attached to their Chrome, computer use or
@@ -99,6 +111,9 @@ agent-browser fill @e7 "op://Shared with Chrome Relay/GitHub/otp" # the current 
 - Field names: `username`, `password`, `otp` (the one-time code), or any other field by its name. The vault
   is one of the vaults `chrome-relay vault` lists.
 - Use `fill` (one reference, the whole text). `type`, `keyboard` or `eval` would type the reference literally.
+- **2-step codes in separate boxes** (six inputs for six digits): `fill` the first box with the `otp`
+  reference. The relay types one character per box. The same works for a code you read from an email: `fill`
+  the first box with the whole code. Then click Verify/Continue if the page doesn't submit by itself.
 - A value only goes to the item's own website (and its subdomains), over https, into the page itself (not a
   frame inside it). Passwords and other secret fields only go into password fields. A refusal comes back as
   `1Password: ...`: tell the person what it says; don't work around it.
@@ -106,7 +121,9 @@ agent-browser fill @e7 "op://Shared with Chrome Relay/GitHub/otp" # the current 
   elsewhere), print it, or paste a reference into anything but a sign-in field. Values that come back through
   the relay are masked anyway, and every fill, refusal and passkey use is in `chrome-relay audit`.
 - Not set up (`chrome-relay vault` says so), or their Chrome Relay was built without 1Password? It's optional,
-  and setting it up is the person's job (`chrome-relay vault setup`): ask them, never do it yourself.
+  and setting it up is the person's job (`chrome-relay vault setup`): never do it yourself. Sign in with
+  emailed codes and links if the site sends them; otherwise ask them to sign in once, and tell them that
+  `chrome-relay vault setup` lets you do it yourself next time.
 
 ## Saving new logins and 2-step codes
 

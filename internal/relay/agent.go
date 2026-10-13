@@ -331,6 +331,17 @@ func (a *Agent) onMessage(m message) {
 			}
 			return
 		}
+		if text, ok := P["text"].(string); ok && m.Method == "Input.insertText" && child == "" && codeLike(text) {
+			if el := a.focusedField(p, tab); el != nil && el.Boxes >= len([]rune(text)) {
+				a.auditCommand(tab, m, P)
+				if r := a.typeText(p, tab, el, text); r.Error != "" {
+					a.err(m, r.Error)
+				} else {
+					a.ok(m, nil)
+				}
+				return
+			}
+		}
 		if (m.Method == "Input.dispatchMouseEvent" && P["type"] == "mousePressed") || (m.Method == "Input.dispatchKeyEvent" && (P["type"] == "rawKeyDown" || P["type"] == "keyDown")) {
 			a.lastInput[tab] = time.Now()
 		}
@@ -905,9 +916,9 @@ func (a *Agent) onDetached(t int, d detach) bool {
 			if site == "" {
 				site = "a site"
 			}
-			a.blocked = fmt.Sprintf("SIGN-IN NEEDED: %s (signing in to %s as %s). Ask the person at this Mac to sign in to Google as %s in their own Chrome window for this profile, then retry. Do not sign in yourself.", note.NeedsUser, site, note.Account, note.Account)
+			a.blocked = fmt.Sprintf("SIGN-IN NEEDED: %s (signing in to %s as %s). Sign in yourself if you can: open the page again and fill the Google login for %s from 1Password (`chrome-relay vault`), with a 2-step code from the vault or from the person's email. If the vault has no such login, ask the person at this Mac to sign in to Google as %s in their own Chrome window for this profile, then retry.", note.NeedsUser, site, note.Account, note.Account, note.Account)
 		} else {
-			a.blocked = fmt.Sprintf("the page cannot be automated: another extension (usually 1Password) put its frame in it, at %s. If that is a sign-in page, ask the person at this Mac to sign in in their own window, then retry.", d.url)
+			a.blocked = fmt.Sprintf("the page cannot be automated: another extension (usually 1Password) put its frame in it, at %s. If that is a sign-in page, open it again once and retry. If it happens again, ask the person at this Mac to sign in in their own window, then retry.", d.url)
 		}
 	}
 	if w := a.paused[t]; w != nil {

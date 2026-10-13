@@ -219,14 +219,14 @@
 
       <article class="tile reveal">
         <h3>Uses the logins already in your Chrome</h3>
-        <p>The agent works in the Chrome profile you pick by email, so it is already signed in wherever you are: Google Workspace, GitHub, your internal tools. It clicks through Google account pickers for accounts that are already signed in, and popups open as its own tabs. When a page asks for a password, passkey or 2-step code, it stops and asks you, unless you have let it sign in with 1Password.</p>
+        <p>The agent works in the Chrome profile you pick by email, so it is already signed in wherever you are: Google Workspace, GitHub, your internal tools. It clicks through Google account pickers for accounts that are already signed in, and popups open as its own tabs. When a page asks for a password or 2-step code, it signs in on its own: from the 1Password vaults you share with it, or with the code the site emailed you. It asks you only when it has no way in.</p>
         <div class="flow" aria-hidden="true">
           <div class="flow-step"><span class="flow-k">site</span>app.example.com</div>
           <span class="flow-arrow"></span>
           <div class="flow-step"><span class="flow-k">Google</span>choose account</div>
           <span class="flow-split">
             <span class="flow-out flow-out--ok"><b>✓</b> already signed in: agent continues</span>
-            <span class="flow-out flow-out--stop"><b>■</b> needs a password: asks you, or 1Password</span>
+            <span class="flow-out flow-out--stop"><b>■</b> needs a password: 1Password, or asks you</span>
           </span>
         </div>
       </article>
@@ -431,7 +431,7 @@ Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
 
 Rules while you do this:
 - Never print, log or paste the URL from `chrome-relay url`. It contains this Mac&#x27;s secret.
-- Never type my passwords, never pick Google accounts and never complete a sign-in for me. If a page needs a login, stop and ask me. Never ask me for a 1Password token or secret: I type those myself.
+- While setting up, don't sign in to anything for me: if a page needs a login, ask me. Never ask me for a 1Password token or secret: I type those myself. (Once it's set up, agents do sign in on their own: from 1Password, and with codes sent to my email.)
 - Never drive my Chrome any other way: no --auto-connect, no --cdp 9222, no --headed, no Playwright attached to it and no AppleScript.</pre>
       <p class="step-note">The same prompt is at <a href="setup-prompt.txt">agent-chrome-relay.aindeev.com/setup-prompt.txt</a>. To set it up by hand instead:</p>
     </div>
@@ -522,7 +522,7 @@ Rules while you do this:
       </details>
       <details>
         <summary>Can an agent sign in for me?</summary>
-        <p>Not with passwords it knows, and never by picking accounts on its own. If a Google account chooser shows an account that is already signed in, the extension picks it. If a page needs a password, passkey or 2-step code, the agent stops and asks you to sign in in your own window. If you run <code>chrome-relay vault setup</code>, agents can sign in with 1Password instead: in the 1Password accounts you pick, Chrome Relay creates a shared vault for agents and a service account that can open only that vault. The agent fills a field with a reference like <code>op://Shared with Chrome Relay/GitHub/password</code>, and the relay types the value, only on that item&#x27;s website. You approve with Touch ID on the Mac or, if you pair it, Face ID on your iPhone, and the prompt names the agent, the item and the site.</p>
+        <p>Yes, so a task doesn’t stop at a login page. If a Google account chooser shows an account that is already signed in, the extension picks it. If a page needs a password or 2-step code, the agent signs in with 1Password, and with codes the site sends to your email, which it reads and types itself; it asks you only when it has no way in. For 1Password, run <code>chrome-relay vault setup</code>: in the 1Password accounts you pick, Chrome Relay creates a shared vault for agents and a service account that can open only that vault. The agent fills a field with a reference like <code>op://Shared with Chrome Relay/GitHub/password</code>, and the relay types the value, only on that item&#x27;s website. You approve with Touch ID on the Mac or, if you pair it, Face ID on your iPhone, and the prompt names the agent, the item and the site.</p>
       </details>
       <details>
         <summary>Can agents create accounts and turn on 2-step verification?</summary>

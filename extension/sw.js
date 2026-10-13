@@ -228,7 +228,7 @@ chrome.notifications?.onClicked.addListener(async (id) => {
 
 // Google sign-in hops (IAP, "Sign in with Google"): when the right account is ALREADY signed in, click it
 // and the "Continue"/"Allow" button, like you would. Never types anything: a password, passkey or
-// 2-step screen, or a signed-out account, stops the hop and is reported so the agent asks you.
+// 2-step screen, or a signed-out account, stops the hop and is reported: the agent signs in from 1Password, or asks you.
 function googleAuthStep(account) {
   const visible = (el) => el && el.offsetParent !== null;
   const text = document.body ? document.body.innerText : "";

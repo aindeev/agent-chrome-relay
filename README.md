@@ -204,10 +204,13 @@ running as you, which could read the secret and fake the markers.
 
 ## Sign-ins
 
-Agents never type credentials they know. When a site bounces through Google and the right account is **already signed
-in**, the extension clicks the account and **Continue/Allow** itself (page scripting, so it works even with
-1Password's frame on the page). A password, passkey, 2-step screen or signed-out account stops the hop, and the
-agent gets `SIGN-IN NEEDED: ...` and asks you to sign in in your own window.
+Agents sign in on their own, so a task doesn't stop at a login page. When a site bounces through Google and the
+right account is **already signed in**, the extension clicks the account and **Continue/Allow** itself (page
+scripting, so it works even with 1Password's frame on the page). Otherwise the agent fills the login from the
+1Password vaults you shared (below): username, password and 2-step code, including codes split over one box per
+digit. A code or link the site sends by email, it reads from your mail and types or opens itself, and it ticks
+"remember this device". Only when none of that works (no login in the vault, a passkey only 1Password holds)
+does it ask you, saying what it needs; you also get a notification.
 
 Which Google account a site uses comes from `~/.chrome-relay/identities.json` (`chrome-relay identities`):
 your Chrome profiles (filled in by setup), optional hand-set `sites.rules`, and `sites.learned`, which the

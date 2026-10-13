@@ -19,5 +19,5 @@ Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
 
 Rules while you do this:
 - Never print, log or paste the URL from `chrome-relay url`. It contains this Mac's secret.
-- Never type my passwords, never pick Google accounts and never complete a sign-in for me. If a page needs a login, stop and ask me. Never ask me for a 1Password token or secret: I type those myself.
+- While setting up, don't sign in to anything for me: if a page needs a login, ask me. Never ask me for a 1Password token or secret: I type those myself. (Once it's set up, agents do sign in on their own: from 1Password, and with codes sent to my email.)
 - Never drive my Chrome any other way: no --auto-connect, no --cdp 9222, no --headed, no Playwright attached to it and no AppleScript.
