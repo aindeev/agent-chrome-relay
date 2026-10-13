@@ -11,4 +11,7 @@ type Options struct {
 	Instance string // "" or "dev-mode": picks this instance's Keychain item for the 1Password token
 	Version  string
 	Notifier string // Chrome Relay.app, if installed: macOS notifications when an agent needs the person
+	// Tests only: who is on the other end of a connection, and whether a process is Chrome (default: lsof and ps).
+	Caller   func(remotePort int) Caller
+	IsChrome func(pid int) bool
 }

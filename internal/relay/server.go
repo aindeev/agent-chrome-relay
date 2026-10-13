@@ -114,7 +114,7 @@ func Run(o Options) error {
 	}
 	go s.sweep()
 	s.log("bridge listening on", o.Port)
-	return http.Serve(ln, s)
+	return (&http.Server{Handler: s, ConnState: s.connState}).Serve(ln)
 }
 
 // New prepares a relay from its data folder.
@@ -146,6 +146,12 @@ func New(o Options) (*Server, error) {
 		}
 	}
 	s.caller = func(port int) Caller { return findCaller(port, os.Getenv("CHROME_RELAY_CHECK_TREE") == "0") }
+	if o.Caller != nil {
+		s.caller = o.Caller
+	}
+	if o.IsChrome != nil {
+		s.isChrome = o.IsChrome
+	}
 	cli := "chrome-relay"
 	if o.Instance != "" {
 		cli = "chrome-relay-" + o.Instance
@@ -519,6 +525,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	js := func(v any) { w.Header().Set("content-type", "application/json"); json.NewEncoder(w).Encode(v) }
 	if websocket.IsWebSocketUpgrade(r) {
 		s.accept(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/driver/") {
+		if !authed {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		s.serveDriver(w, r)
 		return
 	}
 	switch p := r.URL.Path; {
@@ -936,7 +950,7 @@ func (s *Server) acceptAgent(c *conn, r *http.Request, prof string, port int, ea
 	b := make([]byte, 3)
 	rand.Read(b)
 	s.mu.Lock()
-	a := &Agent{s: s, conn: c, email: prof, app: who.App, cwd: who.Cwd, sid: hex.EncodeToString(b), last: time.Now()}
+	a := &Agent{s: s, conn: c, email: prof, app: who.App, cwd: who.Cwd, sid: hex.EncodeToString(b), last: time.Now(), id: who}
 	a.init()
 	s.agents[a] = true
 	s.audit(a, "session start", "pid", who.PID, "claudeSession", who.ClaudeSession, "paseoAgent", who.PaseoAgent, "codexThread", who.CodexThread,

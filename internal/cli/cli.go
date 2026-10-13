@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/aindeev/agent-chrome-relay/internal/decide"
 )
 
 const usage = `Chrome Relay: your coding agents drive background tabs in your everyday Chrome.
@@ -39,6 +41,12 @@ const usage = `Chrome Relay: your coding agents drive background tabs in your ev
   chrome-relay phone push --key <AuthKey_KEYID.p8> --team-id <TEAMID>  notify it through Apple push with your own
                                    APNs key, kept in the Keychain (` + "`phone push forget`" + `: back to ntfy)
   chrome-relay notify [test]       macOS notifications when an agent needs you (a sign-in, a passkey to approve)
+  chrome-relay do "<goal>" [--until <check>] [--data key=value]  carry out a goal in your agent tab: fills what
+                                   --data names, replays what worked before, asks a fast decider for the rest, and
+                                   hands back what it isn't sure of (` + "`chrome-relay do --help`" + `)
+  chrome-relay decider [jev|claude ...]  what ` + "`do`" + ` asks: TypeSafe's Jev (` + "`pbpaste | chrome-relay decider jev`" + `),
+                                   else Haiku through your Claude Code
+  chrome-relay flows [forget <site>]  the flows ` + "`do`" + ` saved, replayed without a model
   chrome-relay status              connected profiles and agents
   chrome-relay doctor              check everything and say how to fix what's wrong
   chrome-relay update [--force]    after ` + "`git pull` and `./build`" + `: restart the relay and reload the extension everywhere (waits for idle agents unless --force)
@@ -135,6 +143,7 @@ type cli struct {
 	errw    io.Writer
 	op      func(args ...string) (stdout, stderr []byte, err error) // tests: the 1Password CLI
 	opAccts func() []opAccount                                      // tests: its accounts
+	models  func(choice string) ([]decide.Model, []string)          // tests: the deciders `do` asks
 }
 
 // Main runs every command but serve; returns the exit code.
@@ -147,6 +156,13 @@ func Main(args []string, version string) int {
 	}
 	c := &cli{instance: in, args: rest, version: version, out: os.Stdout, errw: os.Stderr}
 	if err := c.run(); err != nil {
+		var ec exitCode
+		if errors.As(err, &ec) {
+			if ec.msg != "" {
+				fmt.Fprintln(os.Stderr, ec.msg)
+			}
+			return ec.code
+		}
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -168,6 +184,12 @@ func (c *cli) run() error {
 		return c.url()
 	case "status":
 		return c.status()
+	case "do":
+		return c.do()
+	case "decider":
+		return c.decider()
+	case "flows":
+		return c.flows()
 	case "identities":
 		return c.identities()
 	case "vault":
