@@ -148,7 +148,7 @@ func asList(v any) []any {
 // installExtension: how to install the extension in a profile, for messages.
 func (c *cli) installExtension() string {
 	unpacked := "in chrome://extensions turn on Developer mode, then Load unpacked -> " + c.Ext
-	if c.Dev || relay.WebStoreURL() == "" {
+	if c.Dev {
 		return unpacked
 	}
 	return "install it from " + relay.WebStoreURL() + " (or, for this checkout's own copy: " + unpacked + "; not both)"

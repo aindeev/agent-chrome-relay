@@ -388,7 +388,7 @@ Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
 
 1. Check the basics: macOS, Google Chrome, git and Go 1.25+. If agent-browser is missing, install it with `npm i -g agent-browser`. Also check whether Xcode&#x27;s command line tools are installed (`xcode-select -p`): they&#x27;re optional, and only needed for signing in with 1Password and for Chrome Relay&#x27;s own passkeys. If they&#x27;re missing, tell me that and ask whether I want them. Ask me before installing anything else.
 2. Clone the repo to ~/agent-chrome-relay (if it&#x27;s already there, `git pull` instead). In the clone, run `./build`: it compiles Chrome Relay and signs it on this Mac (with my code-signing identity if I have one, otherwise ad-hoc). If it lists several identities, show me the list and ask which one to use, then run `./build --identity &quot;&lt;that name&gt;&quot;`. Tell me what its last lines say it built. Then run `./chrome-relay setup` and read its output.
-3. Installing the extension is my job, not yours. Walk me through it: in each Chrome profile I want agents to use, open https://chromewebstore.google.com/detail/WEBSTORE_ID , click Add to Chrome, then pin it (the puzzle-piece icon in the toolbar, then the pin next to Chrome Relay). Wait until I say it&#x27;s done.
+3. Installing the extension is my job, not yours. Walk me through it: in each Chrome profile I want agents to use, open https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom , click Add to Chrome, then pin it (the puzzle-piece icon in the toolbar, then the pin next to Chrome Relay). Wait until I say it&#x27;s done.
 4. Run `chrome-relay notify test`: macOS asks me to allow notifications from Chrome Relay, which is how I hear that an agent needs me (a sign-in, a passkey to approve). Tell me to allow them, and to let Chrome Relay through any Focus / Do Not Disturb I use. Then run `chrome-relay doctor` and fix whatever it reports until every line is ok.
 5. Run `chrome-relay identities`, show me the profiles it found, and ask which email to use by default and which (if any) only for admin work.
 6. Smoke test with the default profile:
@@ -430,7 +430,7 @@ Rules while you do this:
       <li class="step reveal">
         <span class="step-n">03</span>
         <h3>Add the extension in each profile</h3>
-        <p class="path"><a href="https://chromewebstore.google.com/detail/WEBSTORE_ID">Chrome Relay in the Chrome Web Store</a><span class="sep" aria-hidden="true"></span>Add to Chrome<span class="sep" aria-hidden="true"></span>pin it</p>
+        <p class="path"><a href="https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom">Chrome Relay in the Chrome Web Store</a><span class="sep" aria-hidden="true"></span>Add to Chrome<span class="sep" aria-hidden="true"></span>pin it</p>
         <p class="step-note">Repeat this in every Chrome profile your agents should use, then run <code>chrome-relay doctor</code> to check. The listing is unlisted: it is only at this link. Rather run your clone’s own copy? <code>chrome://extensions</code>, Developer mode, Load unpacked, <code>extension/</code>, instead of the store’s.</p>
       </li>
     </ol>

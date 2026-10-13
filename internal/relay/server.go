@@ -301,24 +301,16 @@ func (s *Server) vaultSettings() vault.Settings {
 }
 
 // WebStoreID is Chrome Relay's ID in the Chrome Web Store (unlisted): the same on every Mac, and only the store's
-// copy can have it. Empty until it is published.
-const WebStoreID = ""
+// copy can have it.
+const WebStoreID = "mdglmmedlbkjphgolcejpphnbclkfnom"
 
-// WebStoreURL is where people install it; empty while WebStoreID is.
-func WebStoreURL() string {
-	if WebStoreID == "" {
-		return ""
-	}
-	return "https://chromewebstore.google.com/detail/" + WebStoreID
-}
+// WebStoreURL is where people install it.
+func WebStoreURL() string { return "https://chromewebstore.google.com/detail/" + WebStoreID }
 
 // allowedExtensionIDs: the Web Store's copy, and unpacked copies. Chrome derives an unpacked extension's ID from its
 // folder; setup records this checkout's.
 func (s *Server) allowedExtensionIDs() []string {
-	var ids []string
-	if WebStoreID != "" {
-		ids = append(ids, WebStoreID)
-	}
+	ids := []string{WebStoreID}
 	if l, ok := s.config()["extensionIds"].([]any); ok {
 		for _, x := range l {
 			if id, ok := x.(string); ok {
@@ -608,7 +600,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			case <-time.After(2 * time.Second):
 			}
-			out[k] = running{v, exts[k], WebStoreID != "" && exts[k] == WebStoreID}
+			out[k] = running{v, exts[k], exts[k] == WebStoreID}
 		}
 		js(out)
 	case p == "/vault" && authed: // what agents may know: titles, websites, usernames; never values

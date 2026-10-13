@@ -77,7 +77,7 @@ lists yours; a free one comes with an Apple ID in Xcode → Settings → Account
 several, pick one with `./build --identity "<name>"`; it's remembered. `chrome-relay doctor` says which build
 you have.
 
-Then, **in each Chrome profile agents should use**: install **[Chrome Relay from the Chrome Web Store](https://chromewebstore.google.com/detail/WEBSTORE_ID)**
+Then, **in each Chrome profile agents should use**: install **[Chrome Relay from the Chrome Web Store](https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom)**
 and **pin** it (puzzle-piece icon → pin) so you see its badge. Check with `chrome-relay doctor`.
 The listing is unlisted: it isn't in the store's search, only at that link. Chrome keeps it up to date, and applies an
 update once no agent tab is open.

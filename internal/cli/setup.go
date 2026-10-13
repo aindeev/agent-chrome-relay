@@ -226,7 +226,7 @@ func (c *cli) setup() error {
   2. turn on Developer mode (top right)
   3. Load unpacked -> ` + c.Ext + `
   4.`
-	if !c.Dev && relay.WebStoreURL() != "" {
+	if !c.Dev {
 		install = `  1. install Chrome Relay from the Chrome Web Store: ` + relay.WebStoreURL() + `
      (or this checkout's own copy instead, never both: chrome://extensions -> Developer mode -> Load unpacked
      -> ` + c.Ext + `)
