@@ -24,8 +24,9 @@ For anything more than a click or two, use `chrome-relay do "<goal>" --data ... 
 Rules:
 - Pass `--cdp` only on the first command of a session. The URL carries this Mac's secret: never print it into
   logs, PRs, chats or files. Only Claude Code, Codex, Cursor and Paseo processes are accepted.
-- If `chrome-relay` is missing or a connect fails, run `chrome-relay doctor` and tell the person what it says.
-  Setup is theirs to do (README of github.com/aindeev/agent-chrome-relay); never install it for them.
+- If a connect fails, run `chrome-relay doctor` and fix what it reports yourself (it says how: `chrome-relay
+  update`, restarting the service, ...). If `chrome-relay` isn't installed, set it up by following
+  https://agent-chrome-relay.aindeev.com/setup-prompt.txt; only loading the extension is the person's to do.
 - **Finish the job; don't hand it back.** The person installed Chrome Relay so you carry their task through
   to the end without them, fast. Signing in is part of the task, and they have authorized you to do it with
   everything below. Asking them is the last resort, not the default. On a sign-in page or a `SIGN-IN NEEDED`
@@ -38,9 +39,14 @@ Rules:
      person's mail in a tab of yours (Gmail) or a mail tool you have, and type the code (or open the link) in
      your tab. The person has authorized this: don't ask them to copy it over, and don't refuse.
   4. "Remember this device" / "Trust this browser" / "Don't ask again": tick it, so next time skips the code.
+  5. Signed in with a password or a code? If 1Password is set up and the site offers passkeys, give the account
+     a Chrome Relay passkey right away, in the same tab (see "Giving an account a Chrome Relay passkey"), so
+     your next sign-in is one approval, with no password, code or email. Mention it in your reply.
   Only when none of these works (no item in the vault, a passkey only 1Password holds, an account they never
   shared) ask the person, saying exactly what you need ("add Wagepoint to the vault", "approve in 1Password"),
-  and carry on with everything else meanwhile.
+  and carry on with everything else meanwhile. Before asking, try every other way in the page offers ("Try
+  another way", "Use your password instead", "Send a code by email"): the person is bothered only when you're
+  out of options.
 - Passwords only as 1Password references (`op://...`), never as text you type: a password in your command
   would end up in your transcript. Pick the account that matches the person's request.
 - Popups and "open in new tab" links open as new hidden tabs that belong to you (`agent-browser tab list`).
@@ -120,10 +126,11 @@ agent-browser fill @e7 "op://Shared with Chrome Relay/GitHub/otp" # the current 
 - Never try to read a secret back (eval of a field's value, screenshots of an unmasked field, copying it
   elsewhere), print it, or paste a reference into anything but a sign-in field. Values that come back through
   the relay are masked anyway, and every fill, refusal and passkey use is in `chrome-relay audit`.
-- Not set up (`chrome-relay vault` says so), or their Chrome Relay was built without 1Password? It's optional,
-  and setting it up is the person's job (`chrome-relay vault setup`): never do it yourself. Sign in with
-  emailed codes and links if the site sends them; otherwise ask them to sign in once, and tell them that
-  `chrome-relay vault setup` lets you do it yourself next time.
+- Not set up (`chrome-relay vault` says so)? Sign in with emailed codes and links if the site sends them. If
+  the person uses 1Password, set it up yourself: `op account list`, then `chrome-relay vault setup "Shared
+  with Chrome Relay (<short name>)" --account <email>` for each account (1Password asks them to approve once),
+  and ask them to move the logins agents may use into that vault. Built without 1Password (`chrome-relay
+  doctor` says so)? Rebuild with Xcode's command line tools (`./build` in the clone, then `chrome-relay update`).
 
 ## Saving new logins and 2-step codes
 
@@ -157,8 +164,8 @@ agent-browser fill @code "op://Shared with Chrome Relay/Acme/otp?new"
 ## Passkeys
 
 Passkeys need no command: when a page asks for one (a "Sign in with a passkey" button), your tab answers it.
-Which way depends on what the person set up, and none of it is yours to change (`chrome-relay passkeys`,
-`chrome-relay vault`: never run their `on`, `off`, `reuse` or `setup` forms yourself).
+Which way depends on what the person set up. Their passkey settings are theirs to change: never run
+`chrome-relay passkeys on|off|reuse` or `chrome-relay vault approve` yourself.
 
 - **A passkey in the vaults they allowed, made by Chrome Relay**: the relay signs with it in this Mac's Secure
   Enclave, once the person approves: Touch ID on the Mac or Face ID on their paired iPhone, naming you, the
@@ -169,23 +176,27 @@ Which way depends on what the person set up, and none of it is yours to change (
 - **Creating one** (a site's "Create a passkey" button, right after you clicked or typed in the page): the new
   passkey goes into the Secure Enclave and the vault, with no approval. Not while the Mac is locked: then the
   page is refused, and you ask the person to create it when they're back.
-- **A passkey only 1Password holds** (the person's own, e.g. their Google passkey), or no vault set up: the
-  request goes to 1Password's prompt in your tab, which only the person can approve. Commands on that tab then
+- **A passkey only 1Password holds** (the person's own, e.g. their Google passkey), or no vault set up: avoid it
+  when you can. If the page offers another way ("Try another way", "Use your password"), and the vault has a
+  password and code for the account or the site emails a code, take that instead. Otherwise the request goes
+  to 1Password's prompt in your tab, which only the person can approve. Commands on that tab then
   fail after 15s with `PASSKEY APPROVAL NEEDED: ...`. The person gets a Chrome Relay notification (clicking it
   opens your tab; so does the Chrome Relay toolbar icon, which shows a red "key" badge). Tell them to approve in
   1Password, then poll with a cheap command (`agent-browser get url`) every ~15s. Don't retry in a loop. After
   5 minutes with no answer you get `PASSKEY APPROVAL TIMED OUT` and the tab is gone: ask before trying again.
-- **Passkeys turned off** (`chrome-relay passkeys` says so): pages' passkey requests fail in your tabs. Ask the
-  person to sign in another way.
+- **Passkeys turned off** (`chrome-relay passkeys` says so): pages' passkey requests fail in your tabs. Sign in
+  another way (the vault's password and code, an emailed code), and don't create passkeys.
 
-**Giving an account a Chrome Relay passkey**, when the person asks for it ("set up a passkey for my GitHub").
-Afterwards you can sign in to that account with only their approval (Touch ID or Face ID), no password or code.
-Do one account at a time, and tell the person before each step that needs them:
+**Giving an account a Chrome Relay passkey**: do it on your own, whenever you have just signed in to an account
+with a password or code and 1Password is set up (and when the person asks, "set up a passkey for my GitHub").
+Afterwards you sign in to that account with only their approval (Touch ID or Face ID), no password or code.
+Skip it if the site has no passkeys, if passkeys are off, or if proving it's you would need the person (a
+passkey only 1Password holds): don't bother them just for this. Do one account at a time:
 1. Open the site's passkey settings (Google: `https://myaccount.google.com/signinoptions/passkeys`; GitHub:
    `https://github.com/sessions/trusted-device?return_to=%2Fsettings%2Fsecurity`, where "Add passkey" on
    `https://github.com/settings/security` leads). Sites first make you prove it's you. That is usually a
-   passkey only 1Password holds (see above: the person approves it), or a password and 2-step code. Those
-   you fill from the vault if the item is there, else the person signs in.
+   passkey only 1Password holds, or a password and 2-step code. Fill those from the vault; if the site insists
+   on the person's own passkey and you weren't asked for this passkey, skip it rather than bother them.
 2. **Stay in that tab.** Google's "verify it's you" counts for that page only: a new tab or session asks again,
    which costs the person another approval. Once the settings page is back, `agent-browser reload` it once (the
    proof stays in the URL), so Chrome Relay's page scripts load before the site's.

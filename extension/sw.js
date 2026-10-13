@@ -266,12 +266,7 @@ async function handleGoogleAuth(tabId) {
         const res = r && r.result || { state: "waiting" };
         if (res.state === "clicked") { last = { url: tab.url, what: res.what, at: Date.now(), n: (last ? last.n : 0) + 1 }; send({ auth: { tabId, site, account, action: res.what } }); }
         if (res.state === "needs_user") {
-          // the agent is told too, but the person may not be watching it: say so on the Mac
-          if (!nativeNotify) chrome.notifications?.create(`attn-${tabId}`, {
-            type: "basic", iconUrl: "icons/icon-128.png", priority: 2,
-            title: "Chrome Relay: an agent needs you to sign in",
-            message: `${res.why}${site ? ` (for ${site})` : ""}. Sign in as ${account} in this profile, then tell the agent to retry. Click to open the page.`,
-          }).catch(() => {});
+          // no notification: the agent signs in itself, and asks the person only if it can't
           return send({ auth: { tabId, site, account, needsUser: res.why, url: tab.url.split("?")[0] } });
         }
       }

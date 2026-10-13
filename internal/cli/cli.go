@@ -40,7 +40,7 @@ const usage = `Chrome Relay: your coding agents drive background tabs in your ev
   chrome-relay phone [pair|test]   let a paired iPhone approve agents' requests with Face ID when you're away
   chrome-relay phone push --key <AuthKey_KEYID.p8> --team-id <TEAMID>  notify it through Apple push with your own
                                    APNs key, kept in the Keychain (` + "`phone push forget`" + `: back to the push relay)
-  chrome-relay notify [test]       macOS notifications when an agent needs you (a sign-in, a passkey to approve)
+  chrome-relay notify [test]       macOS notifications when an agent needs you (a passkey only you can approve)
   chrome-relay do "<goal>" [--until <check>] [--data key=value]  carry out a goal in your agent tab: fills what
                                    --data names, replays what worked before, asks a fast decider for the rest, and
                                    hands back what it isn't sure of (` + "`chrome-relay do --help`" + `)

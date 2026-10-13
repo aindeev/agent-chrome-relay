@@ -69,7 +69,7 @@ func (c *cli) notify() error {
 	}
 	switch st := c.notifierStatus(); st {
 	case "authorized":
-		c.println("on: Chrome Relay notifies you when an agent needs you (a sign-in, or a passkey to approve in 1Password).")
+		c.println("on: Chrome Relay notifies you when an agent is stuck on something only you can do (a passkey to approve in 1Password).")
 		c.printf("`%s notify test` sends one. A Focus (Do Not Disturb) hides them unless you let Chrome Relay through.\n", c.Name)
 	case "denied":
 		c.println("off: turn on System Settings > Notifications > Chrome Relay.")

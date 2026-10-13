@@ -74,7 +74,8 @@ chrome-relay do ──http /driver────────┘         ▲
 ## Setup (once per Mac, ~2 minutes)
 
 Fastest: paste [this prompt](https://agent-chrome-relay.aindeev.com/setup-prompt.txt) into Claude Code, Codex or
-Cursor and let your agent do it. By hand:
+Cursor in its auto mode (Claude Code: Shift+Tab, or `claude --permission-mode auto`; Codex:
+`--full-auto`) and let your agent do it. You only load the extension and approve in 1Password. By hand:
 
 Needs macOS, Google Chrome, [Go](https://go.dev/dl/) 1.25+ (`brew install go`) and
 [`agent-browser`](https://github.com/vercel-labs/agent-browser) (`npm i -g agent-browser`).
@@ -210,7 +211,7 @@ scripting, so it works even with 1Password's frame on the page). Otherwise the a
 1Password vaults you shared (below): username, password and 2-step code, including codes split over one box per
 digit. A code or link the site sends by email, it reads from your mail and types or opens itself, and it ticks
 "remember this device". Only when none of that works (no login in the vault, a passkey only 1Password holds)
-does it ask you, saying what it needs; you also get a notification.
+does it ask you, saying what it needs.
 
 Which Google account a site uses comes from `~/.chrome-relay/identities.json` (`chrome-relay identities`):
 your Chrome profiles (filled in by setup), optional hand-set `sites.rules`, and `sites.learned`, which the
@@ -226,7 +227,7 @@ Nothing below happens unless you set it up, and each part can be turned off agai
 | Signing in with 1Password (passwords, 2-step codes), and saving the logins agents create | **off** | `chrome-relay vault setup` | `chrome-relay vault forget` |
 | Passkeys in agent tabs | on: 1Password's own prompt answers, or Chrome Relay's Secure Enclave passkeys if you have 1Password set up | `chrome-relay passkeys on` | `chrome-relay passkeys off` |
 | Approving on your iPhone (Face ID), when away from the Mac | **off** | `chrome-relay phone pair` | `chrome-relay phone forget` |
-| Notifications when an agent needs you (a sign-in, a passkey to approve in 1Password) | on once you allow them | `chrome-relay notify test`, then allow | System Settings > Notifications > Chrome Relay |
+| Notifications when an agent needs you (a passkey only you can approve in 1Password) | on once you allow them | `chrome-relay notify test`, then allow | System Settings > Notifications > Chrome Relay |
 | One approval for several passkey sign-ins | **off** (every signature asks) | `chrome-relay passkeys reuse 120` (1–300 s) | `chrome-relay passkeys reuse off` |
 | A fast decider for `chrome-relay do` (TypeSafe's Jev; page text of agent tabs then goes to TypeSafe) | **off**; Haiku through your Claude Code if it's installed | `pbpaste \| chrome-relay decider jev` | `chrome-relay decider jev forget` |
 

@@ -909,16 +909,9 @@ func (s *Server) onExtension(p *profile, b []byte) {
 		}
 		if a.NeedsUser != "" {
 			s.log("sign-in hop: tab", a.TabID, "needs you:", a.NeedsUser, a.Site)
+			// no notification: the agent is on that page and signs in itself (1Password, emailed codes); it asks the
+			// person only if it can't
 			s.notes[a.TabID] = authNote{a.TabID, a.Site, a.Account, a.NeedsUser, a.URL}
-			for ag := range s.agents {
-				if pr := ag.p(); ag.tabs[a.TabID] && pr != nil {
-					for_ := ""
-					if a.Site != "" {
-						for_ = " (for " + a.Site + ")"
-					}
-					s.alert(pr.prof, a.TabID, "An agent needs you to sign in", fmt.Sprintf("%s%s. Sign in as %s, then tell the agent to retry. Click to open the page.", a.NeedsUser, for_, a.Account))
-				}
-			}
 		}
 	case m.Paused != nil:
 		s.log("tab", m.Paused.TabID, "paused:", m.Paused.Reason)
