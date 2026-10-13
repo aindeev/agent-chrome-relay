@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fewer round trips, checked steps: the approach behind chrome-relay do</title>
+  <meta name="description" content="Why AI agents are slow in a browser (the model round trip per click, not the browser), and how chrome-relay do fixes it: saved flows, the agent's own data, a fast decision model (TypeSafe's Jev or Claude Haiku), and handing back what it isn't sure of. With a benchmark of decision models.">
+  <link rel="canonical" href="https://agent-chrome-relay.aindeev.com/approach.html">
+  <link rel="icon" type="image/png" sizes="128x128" href="icon.png">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Fewer round trips, checked steps: the approach behind chrome-relay do">
+  <meta property="og:description" content="Agents in a browser are slow because of the model round trip per click. chrome-relay do takes the goal once and carries it out, asking a fast decision model only when it has to.">
+  <meta property="og:url" content="https://agent-chrome-relay.aindeev.com/approach.html">
+  <meta property="og:image" content="https://agent-chrome-relay.aindeev.com/social-preview.png">
+  <style>
+    body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Inter", sans-serif; color: #111; max-width: 760px; margin: 0 auto; padding: 48px 24px 80px; }
+    h1 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; }
+    h2 { font-size: 21px; margin: 40px 0 8px; }
+    h3 { font-size: 17px; margin: 26px 0 6px; }
+    .fine { color: #666; font-size: 14px; margin: 0 0 28px; }
+    code, pre { font: 14px "JetBrains Mono", ui-monospace, monospace; background: #f3f3f1; }
+    code { padding: 1px 4px; }
+    pre { padding: 12px 14px; overflow-x: auto; line-height: 1.5; }
+    table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 12px 0; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e6e6e3; vertical-align: top; }
+    th { font-weight: 600; }
+    td.n { text-align: right; white-space: nowrap; }
+    .note { color: #555; font-size: 14px; }
+    a { color: inherit; }
+  </style>
+</head>
+<body>
+<p><a href="./">← Chrome Relay</a></p>
+<h1>Fewer round trips, checked steps</h1>
+<p class="fine">The approach behind <code>chrome-relay do</code>. Alexey Indeev, October 2026.</p>
+
+<p>Chrome Relay lets coding agents (Claude Code, Codex, Cursor, Paseo) use your own Chrome, signed in as you, in
+background tabs. It was already fast: about 0.15 s per command. Agents still felt slow in the browser, and not
+always reliable. This page explains why, what <code>chrome-relay do</code> changes, and which decision models it
+uses and why.</p>
+
+<h2>The browser isn't the slow part</h2>
+<p>We measured both ends.</p>
+<table>
+  <tr><th>What</th><th class="n">Time</th></tr>
+  <tr><td>One agent-browser command through the relay (agent-browser's own headless Chrome: 13–15 ms)</td><td class="n">15–20 ms</td></tr>
+  <tr><td>One page script round trip through the relay and the extension</td><td class="n">~1 ms</td></tr>
+  <tr><td>Filling a 7-field form with a script, reading the page before every step</td><td class="n">77 ms total</td></tr>
+  <tr><td>Gap between two actions of a real agent (median; 4,742 actions in 181 sessions on one Mac)</td><td class="n">2.8 s</td></tr>
+  <tr><td>Same, 90th percentile</td><td class="n">17 s</td></tr>
+</table>
+<p>97% of the agents' time in a session went into gaps longer than a second: the agent reading the page, thinking
+and choosing one click. The driving itself is about 10 ms a step. One more number: 8% of clicks were repeated at the
+same spot within 15 seconds, because the first one didn't take and the agent had to look again.</p>
+<p>So the way to make agents faster in a browser is not a faster browser. It's fewer model round trips, and steps
+that check themselves so the agent doesn't have to.</p>
+
+<h2>The approach: say the goal once</h2>
+<pre>agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com/team/invite
+chrome-relay do "Invite the new teammate as an admin" \
+  --data "Email=ada@example.com" --data "Role=Admin" --until "text:Invitation sent"</pre>
+<p>The agent states the goal, gives the values it already knows, and says how to tell it's done. Chrome Relay then
+carries it out in the agent's tab. For each step, it uses the cheapest thing that works:</p>
+<ol>
+  <li><strong>A flow that worked before.</strong> When a run ends with its <code>--until</code> check met, its steps
+    are saved for that site (element roles and labels, and which data key went where, never the values). The same
+    kind of goal on that site replays at browser speed with the new data: no model at all.</li>
+  <li><strong>The agent's data.</strong> A <code>--data</code> key that names a field ("Email" finds "E-mail
+    address") fills it, picks the dropdown option or ticks the box. No model. Values can be 1Password references,
+    which the relay types without the agent or any model seeing them.</li>
+  <li><strong>A fast decision model</strong> for the rest: it chooses the next operation and target from a shortlist
+    of the page's controls, and which of the agent's values goes into a field. It can't invent text, selectors or
+    code.</li>
+  <li><strong>Hand back.</strong> Whatever it isn't sure of goes back to the agent with what was done, the page it's
+    on, and what it was choosing between: low confidence, a field with no value, a consequential click the goal
+    doesn't name (delete, send, pay, deploy, authorize, …), a covered button, going in circles, leaving the site.
+    "Done" only counts when <code>--until</code> holds.</li>
+</ol>
+
+<h3>Steps that check themselves</h3>
+<p>Before every action the relay checks that the element is still the one the decision was about, that it's
+enabled, on screen and not covered by something else (open shadow roots included). After the action it waits for the
+page to settle, by watching the DOM rather than polling, and reads back what changed. The click or the typing goes
+through the same path as the agent's own commands, so the audit trail and 1Password handling apply unchanged.</p>
+
+<h2>Choosing the decision model</h2>
+<p>The idea of a small, fast "System 1" model choosing the next browser action came from
+<a href="https://github.com/browser-use/jev-ultrafast">browser-use/jev-ultrafast</a>, which drives Google Flights
+with <a href="https://docs.typesafe.ai">TypeSafe's Jev</a> in about 7 seconds. Jev doesn't generate text: it returns
+a probability for each allowed answer to typed questions. Cloudflare's Clef models answer the same request format,
+and several small open models do too. We compared them on the job <code>chrome-relay do</code> gives them.</p>
+<p><strong>The test.</strong> Next-action decisions, in jev-ultrafast's request format (which operation, and for each
+operation which element):</p>
+<ul>
+  <li><strong>Live</strong>: 23 steps on 11 public sites, read with Jev's own page reader. Where several answers
+    are right, as with any empty field of a form, each counts.</li>
+  <li><strong>Mind2Web</strong>: 150 steps from 97 tasks on 48 sites, about 30 candidates each, following the
+    MindAct multiple-choice setup. Its labels are rougher and it has no page text, so it's harder than real
+    pages.</li>
+</ul>
+<table>
+  <tr><th>Decider</th><th>Runs</th><th class="n">Live</th><th class="n">Mind2Web</th><th class="n">Median per decision</th></tr>
+  <tr><td><strong>TypeSafe Jev 1.13</strong></td><td>cloud</td><td class="n">91%</td><td class="n">67%</td><td class="n"><strong>0.15 s</strong></td></tr>
+  <tr><td><strong>Claude Haiku through Claude Code</strong> (one process kept running)</td><td>cloud, your plan</td><td class="n">96%</td><td class="n">65%</td><td class="n">1.3–1.6 s</td></tr>
+  <tr><td>Cloudflare Clef (27B), Workers AI</td><td>cloud</td><td class="n">83%</td><td class="n">67%</td><td class="n">0.53 s</td></tr>
+  <tr><td>Cloudflare Clef-flash (9B), Workers AI</td><td>cloud</td><td class="n">83%</td><td class="n">47%</td><td class="n">0.62–0.79 s</td></tr>
+  <tr><td>Gemini 3.8 Flash</td><td>cloud</td><td class="n">96%</td><td class="n">82%</td><td class="n">1.9 s</td></tr>
+  <tr><td>Gemini 3.5 Flash-Lite</td><td>cloud</td><td class="n">91%</td><td class="n">71%</td><td class="n">0.95 s</td></tr>
+  <tr><td>LiquidAI d1-3B, 4-bit (1.7 GB)</td><td>on the Mac</td><td class="n">74%</td><td class="n">52%</td><td class="n">0.8 s</td></tr>
+  <tr><td>Decision models under 1B (Kev-0.8B, d1-omni-600M, Laya)</td><td>on the Mac</td><td class="n">9–30%</td><td class="n">14–19%</td><td class="n">0.2–0.5 s</td></tr>
+  <tr><td>No model: best word match (operation given)</td><td>on the Mac</td><td class="n">67%</td><td class="n">20%</td><td class="n">~0</td></tr>
+</table>
+<p class="note">Latency is measured from a MacBook (M4 Max) over the public APIs, not model time in a datacenter:
+Cloudflare quotes 39 ms and 209 ms for the Clef models on its own GPUs. The request format and rules were written for
+Jev, which may favour it. Local models ran in llama.cpp on the Mac's GPU, except Laya, which ran in PyTorch. Haiku was measured on
+the shortlisted requests (15 elements) that <code>chrome-relay do</code> sends; the others on the full ones.</p>
+
+<h3>What we took from it</h3>
+<ul>
+  <li><strong>Jev is the fast default</strong>: as accurate as the cheap general models on real pages, at a sixth of
+    the latency. It needs a TypeSafe key, and the page text of agent tabs goes to TypeSafe, so it's opt-in
+    (<code>chrome-relay decider jev</code>).</li>
+  <li><strong>Without a key, Haiku through the person's own Claude Code</strong> is just as accurate, slower, and
+    needs nothing new. It only works as one long-running process: starting <code>claude -p</code> for each decision
+    costs 4–8 s.</li>
+  <li><strong>Small local models aren't ready</strong> to choose browser steps on their own. Under 1B they score
+    9–30%, and 3B is usable but costs about a second of GPU per step. Laya's own model card says it is "a fast base to
+    specialise, not a zero-shot decision engine". Fine-tuning one on the steps agents actually take is a future
+    option.</li>
+  <li><strong>Shortlisting the page is nearly free.</strong> Sending the 15 elements most related to the goal,
+    instead of all of them, kept the right answer in 100% of live steps and 87% of Mind2Web steps. It cut the request
+    by more than half, and cost Jev 2 points and Flash-Lite 2–3 on Mind2Web, nothing on live pages.</li>
+  <li><strong>Most steps don't need a model.</strong> Filling from the agent's data and replaying saved flows covers
+    forms, sign-ins and repeated admin work without one.</li>
+</ul>
+
+<h2>In practice</h2>
+<p>In a real Chrome, through the extension, with Jev:</p>
+<table>
+  <tr><th>Goal</th><th>How</th><th class="n">Time</th></tr>
+  <tr><td>Fill and submit a 7-step order form</td><td>3 fields from data, 4 Jev decisions, the result checked</td><td class="n">2.5 s</td></tr>
+  <tr><td>The same goal with other data</td><td>replayed as a flow, no model</td><td class="n">1.2 s</td></tr>
+  <tr><td>Find and open a Wikipedia article through the search suggestions</td><td>2 Jev decisions</td><td class="n">2.0 s</td></tr>
+</table>
+<p>Step by step, the agents we measured took a median of about 3 seconds per action, before counting the
+clicks they had to repeat.</p>
+
+<h2>Limits</h2>
+<ul>
+  <li>The page reader covers HTML and ARIA controls and open shadow roots. It doesn't yet look inside iframes or
+    closed shadow roots, and canvas apps (such as Google Docs) are out of reach.</li>
+  <li>A decision model can be wrong. That's why confidence is gated, consequential clicks need the goal to name them,
+    and "done" needs <code>--until</code>.</li>
+  <li>Page text is untrusted. The model only picks among the page's own controls and the agent's own values, and the
+    run stays on the site it started on.</li>
+</ul>
+
+<h2>Thanks</h2>
+<p><a href="https://github.com/browser-use/jev-ultrafast">browser-use/jev-ultrafast</a> (MIT), whose page snapshot
+and rules <code>chrome-relay do</code> adapts; <a href="https://typesafe.ai">TypeSafe</a> for Jev;
+<a href="https://huggingface.co/Cloudflare/clef">Cloudflare's Clef</a>,
+<a href="https://huggingface.co/LiquidAI/d1-3B">LiquidAI's d1</a>, Kev and Laya, all open models we tried;
+<a href="https://huggingface.co/datasets/osunlp/Multimodal-Mind2Web">Mind2Web</a> for the benchmark; and
+<a href="https://github.com/vercel-labs/agent-browser">agent-browser</a>, which agents still use for everything
+else.</p>
+<p>Code and docs: <a href="https://github.com/aindeev/agent-chrome-relay">github.com/aindeev/agent-chrome-relay</a>.</p>
+</body>
+</html>
