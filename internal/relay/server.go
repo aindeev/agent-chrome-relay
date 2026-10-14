@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -128,6 +129,9 @@ func Run(o Options) error {
 // process, so a new connection.
 func (s *Server) serveSocket(path string) error {
 	os.Remove(path)
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		return errors.New("no way to tell who is at the other end of a Unix socket here")
+	}
 	ul, err := net.Listen("unix", path)
 	if err != nil {
 		return err

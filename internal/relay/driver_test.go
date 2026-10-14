@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -211,10 +210,10 @@ func TestDriverSocket(t *testing.T) {
 	}
 	defer c.Close()
 	seen := <-got
-	if runtime.GOOS == "darwin" && seen != os.Getpid() {
+	if seen != os.Getpid() {
 		t.Errorf("peer pid %d, want %d", seen, os.Getpid())
 	}
-	if runtime.GOOS == "darwin" {
+	{
 		args, env, ppid, ok := procInfo(os.Getpid())
 		if !ok || len(args) == 0 || !strings.Contains(args[0], "relay.test") || len(env) == 0 || ppid != os.Getppid() {
 			t.Errorf("procInfo: %v %q %d env=%d", ok, args, ppid, len(env))
