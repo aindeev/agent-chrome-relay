@@ -21,7 +21,8 @@ var agentEnv = []struct {
 	app string
 	re  *regexp.Regexp
 }{{"claude", regexp.MustCompile(`^(CLAUDECODE|CLAUDE_CODE_[A-Z_]+)=`)}, {"paseo", regexp.MustCompile(`^PASEO_AGENT_ID=`)},
-	{"codex", regexp.MustCompile(`^CODEX_[A-Z_]+=`)}, {"cursor", regexp.MustCompile(`^CURSOR_[A-Z_]+=`)}}
+	{"codex", regexp.MustCompile(`^CODEX_[A-Z_]+=`)}, {"cursor", regexp.MustCompile(`^CURSOR_[A-Z_]+=`)},
+	{"pi", regexp.MustCompile(`^PI_SESSION_ID=`)}} // pi harness: PI_SESSION_ID is injected into every tool call
 var agentProc = regexp.MustCompile(`(?i)(^|/)(claude|codex|cursor-agent|Cursor|Paseo)( |$|\.app)`)
 
 func sh(name string, args ...string) string {
@@ -93,5 +94,7 @@ func findCaller(remotePort int, noTree bool) Caller {
 }
 
 func isChrome(pid int) bool {
-	return strings.Contains(sh("ps", "-o", "command=", "-p", strconv.Itoa(pid)), "Google Chrome")
+	cmd := sh("ps", "-o", "command=", "-p", strconv.Itoa(pid))
+	// macOS: "Google Chrome"; Linux: the binary is .../google/chrome/chrome
+	return strings.Contains(cmd, "Google Chrome") || strings.Contains(cmd, "/google/chrome") || strings.Contains(cmd, "/chrome/chrome")
 }
