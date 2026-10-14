@@ -68,16 +68,23 @@
   if (phase === 'settle') {
     // until the DOM has been quiet for 120 ms (at most 1.5 s); a combobox waits for its options. Timers, not
     // animation frames: those may not run in a background tab.
+    // A click on a link to another page in this tab waits for the URL to change (at most 5 s): an app that
+    // fetches the next page before swapping it in (GitHub, Turbo, Next.js) leaves the DOM quiet meanwhile.
+    const link = q.kind === 'click' && e?.closest?.('a[href]');
+    const from = location.href.split('#')[0];
+    const leaving = !!link && (!link.target || link.target === '_self') && !link.hasAttribute('download') &&
+      /^https?:/.test(link.href) && link.href.split('#')[0] !== from;
     return new Promise(resolve => {
       let quietSince = performance.now(), ticks = 0, done = false;
       const mo = new MutationObserver(() => { quietSince = performance.now(); });
       mo.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
       const finish = () => { if (!done) { done = true; mo.disconnect(); resolve(true); } };
-      setTimeout(finish, 1500);
+      setTimeout(finish, leaving ? 5000 : 1500);
       const tick = () => {
         if (done) return;
         const listbox = e && e.getAttribute('role') === 'combobox' && q.kind === 'fill';
         const options = listbox && [...document.querySelectorAll('[role="option"]')].some(o => o.checkVisibility());
+        if (leaving && location.href.split('#')[0] === from) quietSince = performance.now();
         if (++ticks >= 2 && performance.now() - quietSince > (listbox && !options ? 400 : 120)) finish();
         else setTimeout(tick, 20);
       };
