@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"cmp"
 	"context"
 	"os"
 	"os/exec"
@@ -60,7 +61,7 @@ func findCaller(remotePort int, noTree bool) Caller {
 		return ""
 	}
 	c := Caller{PID: pid, ClaudeSession: pick("CLAUDE_CODE_SESSION_ID"), PaseoAgent: pick("PASEO_AGENT_ID"), Cwd: pick("PASEO_AGENT_CWD"),
-		CodexThread: pick("CODEX_THREAD_ID"), BrowserSession: pick("AGENT_BROWSER_SESSION")}
+		CodexThread: pick("CODEX_THREAD_ID"), BrowserSession: cmp.Or(pick("CHROME_RELAY_SESSION"), pick("AGENT_BROWSER_SESSION"))}
 	if c.Cwd == "" {
 		c.Cwd = pick("PWD")
 	}

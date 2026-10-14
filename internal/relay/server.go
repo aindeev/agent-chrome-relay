@@ -1013,6 +1013,10 @@ func (s *Server) sweep() {
 	for range time.Tick(time.Minute) {
 		s.mu.Lock()
 		for a := range s.agents {
+			if a.held && len(a.tabs) == 0 && len(a.orphans) == 0 && time.Since(a.last) > 30*time.Minute {
+				s.endHeld(a) // a session the relay held, long since without tabs
+				continue
+			}
 			if time.Since(a.last) > 30*time.Minute && (len(a.tabs) > 0 || len(a.orphans) > 0) {
 				blocked := a.orphans // tabs stuck on a sign-in page: already reported to the agent, still open
 				a.orphans = nil

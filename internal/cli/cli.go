@@ -186,6 +186,9 @@ func (c *cli) run() error {
 		return c.status()
 	case "do":
 		return c.do()
+	case "open", "snapshot", "click", "dblclick", "fill", "type", "select", "check", "uncheck", "hover", "upload", "dialog", "drag", "console", "errors", "cookies", "pdf", "cdp", "is", "press", "scroll", "back", "reload", "get", "eval",
+		"screenshot", "wait", "tabs", "tab", "close":
+		return c.drive(cmd)
 	case "decider":
 		return c.decider()
 	case "flows":

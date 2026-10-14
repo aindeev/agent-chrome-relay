@@ -18,6 +18,12 @@ func driverChrome(h *harness, drive func(expr string) any) *fakeChrome {
 	chrome.peer.mu.Lock()
 	orig := chrome.peer.answer
 	chrome.peer.answer = func(m map[string]any) (any, string) {
+		if m["op"] == "cdp" && m["method"] == "Page.getFrameTree" {
+			return map[string]any{"frameTree": map[string]any{"frame": map[string]any{"id": "main"}}}, ""
+		}
+		if m["op"] == "cdp" && m["method"] == "Page.createIsolatedWorld" { // the driver's scripts run in a world of their own
+			return map[string]any{"executionContextId": 7}, ""
+		}
 		if m["op"] == "cdp" && m["method"] == "Runtime.evaluate" {
 			if e := expr(m); strings.Contains(e, "__crDrive") {
 				return map[string]any{"result": map[string]any{"type": "object", "value": drive(e)}}, ""

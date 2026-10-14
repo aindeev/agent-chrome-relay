@@ -23,8 +23,12 @@ type Element struct {
 	Expanded string   `json:"expanded,omitempty"`
 	Options  []string `json:"options,omitempty"`
 	Onscreen bool     `json:"onscreen"`
+	Frame    bool     `json:"frame,omitempty"` // inside a same-origin frame
 	Required bool     `json:"required,omitempty"`
 }
+
+// Can the element take this operation (click, fill, select, upload)?
+func (e Element) Can(op string) bool { return e.can(op) }
 
 func (e Element) can(op string) bool {
 	for _, o := range e.Ops {
@@ -52,7 +56,9 @@ type Page struct {
 	Key      string    `json:"key"`
 	Elements []Element `json:"elements"`
 	Omitted  int       `json:"omitted"`
-	Scroll   struct {
+	// frames from other sites, which the page reader cannot enter
+	OtherFrames []string `json:"otherFrames,omitempty"`
+	Scroll      struct {
 		Y      int `json:"y"`
 		Height int `json:"height"`
 		View   int `json:"view"`

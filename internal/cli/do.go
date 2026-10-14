@@ -22,7 +22,7 @@ import (
 
 const doUsage = `usage: chrome-relay do "<goal>" [--until <check>]... [--data <key>=<value>]... [options]
 
-Carries out a goal in your current agent tab (open it with agent-browser first, same AGENT_BROWSER_SESSION):
+Carries out a goal in your current tab (` + "`chrome-relay open <url>`" + ` first, or pass --url):
 fills what --data names, replays what worked before on this site, and asks a fast decision model for the rest.
 Whatever it isn't sure of comes back to you (exit code 2) with what it did and what it saw.
 
@@ -30,6 +30,7 @@ Whatever it isn't sure of comes back to you (exit code 2) with what it did and w
                       url:<s>, title:<s>, selector:<css>, js:<expression>. Without one, "done" is the model's word.
   --data <key>=<v>    a value for the goal; the key names the field ("Email=ada@x.com"); v may be op://vault/item/field
   --allow <verb>      let it click a consequential button the goal doesn't name (delete, send, pay, ...; * = any)
+  --url <url>         open this page first (--profile <email>: in that Chrome profile, for a new session)
   --tab <id>          which of your tabs (default: the one you used last)
   --max-steps <n>     default 25        --timeout <seconds>  default 120
   --decider <name>    auto (default: jev, then claude), jev, claude, none
@@ -54,6 +55,7 @@ type doOpts struct {
 	decider         string
 	minConf         float64
 	noFlow, jsonOut bool
+	url, profile    string // open this page first (in this Chrome profile, for a new session)
 }
 
 func parseDo(args []string) (doOpts, error) {
@@ -70,7 +72,7 @@ func parseDo(args []string) (doOpts, error) {
 		var v string
 		var err error
 		switch a {
-		case "--until", "--data", "--allow", "--tab", "--max-steps", "--timeout", "--decider", "--min-confidence":
+		case "--until", "--data", "--allow", "--tab", "--max-steps", "--timeout", "--decider", "--min-confidence", "--url", "--profile":
 			if v, err = next(&i, a); err != nil {
 				return o, err
 			}
@@ -95,6 +97,10 @@ func parseDo(args []string) (doOpts, error) {
 			o.data = append(o.data, decide.Datum{Key: strings.TrimSpace(k), Value: val})
 		case "--allow":
 			o.allow = append(o.allow, strings.ToLower(v))
+		case "--url":
+			o.url = v
+		case "--profile":
+			o.profile = v
 		case "--tab":
 			o.tab, err = strconv.Atoi(v)
 		case "--max-steps":
@@ -179,10 +185,14 @@ type actResult struct {
 	Stale     string      `json:"stale"`
 	Refused   string      `json:"refused"`
 	Navigated bool        `json:"navigated"`
+	Dialogs   []string    `json:"dialogs"`
 	Page      decide.Page `json:"page"`
 	Readback  struct {
-		Changed bool `json:"changed"`
-		Gone    bool `json:"gone"`
+		Changed bool  `json:"changed"`
+		Gone    bool  `json:"gone"`
+		Value   any   `json:"value"`
+		Filled  *bool `json:"filled"`
+		Checked *bool `json:"checked"`
 	} `json:"readback"`
 }
 
@@ -221,6 +231,15 @@ func (c *cli) do() error {
 	ctx, cancel := context.WithTimeout(context.Background(), o.timeout+30*time.Second)
 	defer cancel()
 
+	if o.url != "" {
+		u := o.url
+		if !strings.Contains(u, "://") {
+			u = "https://" + u
+		}
+		if err := d.call("open", map[string]any{"text": u, "profile": o.profile}, nil); err != nil {
+			return err
+		}
+	}
 	var page decide.Page
 	if err := d.call("observe", map[string]any{"tab": d.tab}, &page); err != nil {
 		return err
@@ -458,7 +477,7 @@ func (c *cli) printSummary(s doSummary) {
 		c.printf("HANDED BACK after %d steps, %.1fs: %s\n", len(s.Steps), s.Seconds, s.Why)
 		c.printf("Now on: %s · %s\n", s.Title, s.URL)
 		if len(s.Candidates) > 0 {
-			c.printf("What it was choosing between (continue yourself: agent-browser snapshot -i):\n")
+			c.printf("What it was choosing between (continue yourself: chrome-relay snapshot, then click or fill):\n")
 			for i, e := range s.Candidates {
 				if i == 10 {
 					break
