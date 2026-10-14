@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,6 +65,30 @@ customElements.define('proj-form', class extends HTMLElement { connectedCallback
 	"/danger": `<title>Invoices</title><h1>Invoices</h1><table>
 <tr><td>Invoice 1</td><td><button onclick="location.href='/invoice'">Open</button></td><td><button onclick="document.title='deleted'">Delete</button></td></tr></table>`,
 	"/invoice": `<title>Invoice 1</title><h1>Invoice 1</h1><p>Total 42</p>`,
+	"/divs": `<title>Mail</title><h1>Mail</h1>
+<div class="btn" style="cursor:pointer;display:inline-block;padding:8px" onclick="document.getElementById('out').textContent='Archived'">Archive</div>
+<span tabindex="0" style="display:inline-block;padding:8px" id="star">Star</span>
+<p>Just text, not clickable</p><p id="out"></p>
+<table><tr><td>Message 1</td><td><button>Delete</button></td></tr><tr><td>Message 2</td><td><button>Delete</button></td></tr></table>
+<script>star.addEventListener('click', () => out.textContent = 'Starred')</script>`,
+	"/frames": `<title>Frames</title><h1>Outer page</h1><p>Above the frame</p>
+<iframe src="/inner" width="500" height="160" style="border:3px solid #999;margin-left:40px"></iframe>
+<iframe src="OTHER/inner" width="300" height="120"></iframe>`,
+	"/inner":  `<title>Inner</title><label>Coupon code <input id="c"></label> <button onclick="document.getElementById('r').textContent='Applied '+c.value">Apply</button><p id="r"></p>`,
+	"/upload": `<title>Upload</title><h1>Upload</h1><label class="b">Choose a file<input type="file" id="f" style="display:none" onchange="document.getElementById('n').textContent='Got '+this.files[0].name"></label><p id="n"></p>`,
+	// a page that tries to steer the driver: it fakes where things are and plants a node table of its own
+	"/hostile": `<title>Hostile</title><h1>Hostile</h1><button id="pay" style="position:absolute;top:10px;left:10px" onclick="out.textContent='PAID'">Pay now</button>
+<button id="ok" style="position:absolute;top:200px;left:10px" onclick="out.textContent='OK'">Next</button><p id="out" style="position:absolute;top:300px"></p>
+<script>const real = Element.prototype.getBoundingClientRect, pay = document.getElementById('pay');
+Element.prototype.getBoundingClientRect = function () { return real.call(pay); };
+document.elementFromPoint = () => document.getElementById('ok');
+window.__crDrive = { nodes: new Map(), ids: new WeakMap(), next: 1, rect: () => real.call(pay), describe: () => ({}) };</script>`,
+	// a list row with a control of its own inside, and a few odd ones
+	"/rows": `<title>Rows</title><h1>Tasks</h1><ul><li id="row" role="button" tabindex="0" style="display:flex;width:400px;padding:4px" onclick="if (event.target === this || !event.target.closest('input')) out.textContent='opened'">
+<input type="checkbox" aria-label="Done" onclick="event.stopPropagation(); out.textContent='toggled'"><span style="flex:1">Buy milk</span></li></ul>
+<label><input type="checkbox" id="k"> Remember me</label><p id="out"></p><ol><li class="item">First item</li></ol>
+<input type="search" aria-label="Search"><button>Search</button><search>not this</search>
+<a href="/invoice">Next page</a>`,
 	"/covered": `<title>Welcome</title><h1>Welcome</h1><button onclick="document.body.append('Continued')">Continue</button>
 <div style="position:fixed;inset:0;background:rgba(0,0,0,.4)"><div style="background:#fff;margin:30vh auto;width:300px">Cookies? <button>Accept</button></div></div>`,
 }
@@ -78,7 +103,9 @@ func site(t *testing.T) *httptest.Server {
 			fmt.Fprintf(w, "<title>%s</title><h1>%s</h1>", r.URL.Query().Get("t"), r.URL.Query().Get("t"))
 		default:
 			if p, ok := pages[r.URL.Path]; ok {
-				fmt.Fprint(w, "<!doctype html><meta charset=utf-8>"+p)
+				// another origin for the same server: localhost instead of 127.0.0.1
+				other := "http://localhost:" + r.Host[strings.LastIndex(r.Host, ":")+1:]
+				fmt.Fprint(w, "<!doctype html><meta charset=utf-8>"+strings.ReplaceAll(p, "OTHER", other))
 			} else {
 				http.NotFound(w, r)
 			}
@@ -240,6 +267,20 @@ func fakeExtension(t *testing.T, chrome *cdpClient, relayURL, profile string) {
 					sessions[fmt.Sprint(a["sessionId"])] = tab
 					mu.Unlock()
 					reply["result"] = map[string]any{"tabId": tab}
+				case "close":
+					tab := int(m["tabId"].(float64))
+					mu.Lock()
+					sid := tabs[tab]
+					delete(tabs, tab)
+					delete(sessions, sid)
+					mu.Unlock()
+					if sid != "" {
+						if info, e := chrome.call("Target.getTargetInfo", map[string]any{}, sid); e == "" {
+							if ti, ok := info["targetInfo"].(map[string]any); ok {
+								chrome.call("Target.closeTarget", map[string]any{"targetId": ti["targetId"]}, "")
+							}
+						}
+					}
 				case "cdp":
 					tab := int(m["tabId"].(float64))
 					mu.Lock()
@@ -269,7 +310,9 @@ type e2e struct {
 	nextID int
 }
 
-func newE2E(t *testing.T) *e2e {
+// newE2E: a relay, a headless Chrome and the test pages; with an agent connection that opened a tab (as
+// agent-browser would), unless own is set: then `chrome-relay open` starts the session.
+func newE2E(t *testing.T, own ...bool) *e2e {
 	if os.Getenv("CHROME_RELAY_E2E") != "1" {
 		t.Skip("set CHROME_RELAY_E2E=1 to drive a headless Chrome")
 	}
@@ -288,6 +331,9 @@ func newE2E(t *testing.T) *e2e {
 	chrome := startChrome(t)
 	fakeExtension(t, chrome, srv.URL, "me@example.com")
 	time.Sleep(300 * time.Millisecond)
+	if len(own) > 0 && own[0] {
+		return &e2e{t: t, home: home, port: port, site: site(t)}
+	}
 	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/devtools/browser/agent?token=test-secret&profile=me%40example.com", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -343,6 +389,22 @@ func (e *e2e) do(models []decide.Model, args ...string) (string, int) {
 	}
 	c := &cli{instance: instance{Name: "chrome-relay", Home: e.home, Port: e.port}, args: append([]string{"chrome-relay", "do"}, args...),
 		out: &out, errw: &out, models: func(string) ([]decide.Model, []string) { return models, names }}
+	code := 0
+	if err := c.run(); err != nil {
+		code = 1
+		if ec, ok := err.(exitCode); ok {
+			code = ec.code
+		}
+		out.WriteString(err.Error())
+	}
+	return out.String(), code
+}
+
+// run any chrome-relay command; returns its output and exit code.
+func (e *e2e) run(args ...string) (string, int) {
+	var out bytes.Buffer
+	c := &cli{instance: instance{Name: "chrome-relay", Home: e.home, Port: e.port}, args: append([]string{"chrome-relay"}, args...),
+		out: &out, errw: &out, models: func(string) ([]decide.Model, []string) { return nil, []string{"none"} }}
 	code := 0
 	if err := c.run(); err != nil {
 		code = 1
@@ -522,5 +584,180 @@ func TestDoRealDeciders(t *testing.T) {
 				t.Errorf("invoice: code %d", code)
 			}
 		})
+	}
+}
+
+// The step-by-step commands, with no agent-browser anywhere: `chrome-relay open` starts the session.
+func TestDriveCommands(t *testing.T) {
+	e := newE2E(t, true)
+	want := func(out string, code int, wantCode int, subs ...string) {
+		t.Helper()
+		if code != wantCode {
+			t.Errorf("exit %d, want %d: %s", code, wantCode, out)
+		}
+		for _, s := range subs {
+			if !strings.Contains(out, s) {
+				t.Errorf("missing %q in: %s", s, out)
+			}
+		}
+	}
+	run := func(args ...string) (string, int) {
+		out, code := e.run(args...)
+		t.Log(strings.Join(args, " "), "\n", out)
+		return out, code
+	}
+	out, code := run("snapshot")
+	want(out, code, 1, "no open tab of yours")
+	out, code = run("open", e.site.URL+"/form")
+	want(out, code, 0, "✓ Order")
+	out, code = run("snapshot")
+	want(out, code, 0, `- textbox "Customer name" [@e`, `- combobox "Country" [@e`, "(options: Choose… | Canada | France)", `- checkbox "Subscribe to news"`, `- button "Submit order"`, "required")
+	out, code = run("fill", "Customer name", "Ada Lovelace")
+	want(out, code, 0, `✓ fill textbox "Customer name"`)
+	ref := regexp.MustCompile(`"Telephone" \[(@e\d+)\]`).FindStringSubmatch(func() string { o, _ := e.run("snapshot"); return o }())
+	if ref == nil {
+		t.Fatal("no ref for Telephone")
+	}
+	out, code = run("fill", ref[1], "555-0100")
+	want(out, code, 0, `✓ fill textbox "Telephone"`)
+	out, code = run("select", "Country", "France")
+	want(out, code, 0, "✓ select")
+	out, code = run("click", "radio:Large")
+	want(out, code, 0, "(the page changed)")
+	out, code = run("click", "Subscribe to news", "--snapshot")
+	want(out, code, 0, `- checkbox "Subscribe to news" [@e`, "checked")
+	out, code = run("get", "value", "Customer name")
+	want(out, code, 0, "Ada Lovelace")
+	out, code = run("click", "Nope")
+	want(out, code, 1, `no control named "Nope"`)
+	out, code = run("click", "Submit order")
+	want(out, code, 0, "→ Thanks ·", "country=France", "size=large")
+	out, code = run("wait", "text:Order received for Ada Lovelace")
+	want(out, code, 0, "✓")
+	out, code = run("wait", "text:never there", "--timeout", "0.4")
+	want(out, code, 1, "still not true")
+	out, code = run("get", "text", "h1")
+	want(out, code, 0, "Order received for Ada Lovelace")
+	out, code = run("get", "title")
+	want(out, code, 0, "Thanks")
+	out, code = run("eval", "document.querySelectorAll('h1').length + 1")
+	want(out, code, 0, "2")
+	out, code = run("eval", "nope.nope")
+	want(out, code, 1, "ReferenceError")
+	out, code = run("back")
+	want(out, code, 0, "→ Order")
+	shot := filepath.Join(t.TempDir(), "shot.png")
+	out, code = run("screenshot", shot, "--full")
+	want(out, code, 0, "✓")
+	if b, err := os.ReadFile(shot); err != nil || len(b) < 2000 || string(b[1:4]) != "PNG" {
+		t.Error("screenshot:", err, len(b))
+	}
+	// clickable things without a role, and never guessing between two controls
+	out, code = run("open", e.site.URL+"/divs", "--new")
+	want(out, code, 0, "✓ Mail")
+	out, code = run("snapshot")
+	want(out, code, 0, `- clickable "Archive" [@e`, `- clickable "Star" [@e`)
+	if strings.Contains(out, "Just text") {
+		t.Error("plain text listed as a control")
+	}
+	out, code = run("click", "Archive")
+	want(out, code, 0, "(the page changed)")
+	out, code = run("get", "text", "--selector", "#out")
+	want(out, code, 0, "Archived")
+	out, code = run("click", "Delete")
+	want(out, code, 1, `"Delete" matches 2 controls; use a ref`)
+	out, code = run("tabs")
+	want(out, code, 0, "/form", "/divs")
+	// a same-origin frame is read and driven; another site's frame is named
+	out, code = run("open", e.site.URL+"/frames")
+	want(out, code, 0, "✓ Frames")
+	time.Sleep(300 * time.Millisecond)
+	out, code = run("snapshot")
+	want(out, code, 0, `- textbox "Coupon code" [@e`, "in-frame", "frames from other sites, which this can't read: localhost:")
+	out, code = run("fill", "Coupon code", "SAVE10")
+	want(out, code, 0, "✓ fill")
+	out, code = run("click", "Apply")
+	want(out, code, 0, "(the page changed)")
+	out, code = run("wait", "text:Applied SAVE10", "--timeout", "3")
+	want(out, code, 0, "✓")
+	// a file field hidden behind its label
+	out, code = run("open", e.site.URL+"/upload")
+	want(out, code, 0, "✓ Upload")
+	file := filepath.Join(t.TempDir(), "report.csv")
+	os.WriteFile(file, []byte("a,b\n1,2\n"), 0o600)
+	out, code = run("upload", "file:", file)
+	if code != 0 {
+		out, code = run("upload", "Choose a file", file)
+	}
+	want(out, code, 0, "✓ upload")
+	out, code = run("wait", "text:Got report.csv", "--timeout", "3")
+	want(out, code, 0, "✓")
+	// the page's own scripts can't steer where a click lands
+	out, code = run("open", e.site.URL+"/hostile")
+	want(out, code, 0, "✓ Hostile")
+	out, code = run("click", "Next")
+	want(out, code, 0, "✓ click")
+	out, code = run("get", "text", "--selector", "#out")
+	want(out, code, 0, "OK")
+	// a row's own control is not the row; Space; reading a list item; an ambiguous label is never taken as CSS
+	out, code = run("open", e.site.URL+"/rows")
+	want(out, code, 0, "✓ Rows")
+	out, code = run("click", "button:Done Buy milk")
+	want(out, code, 0, "✓ click")
+	out, code = run("get", "text", "--selector", "#out")
+	want(out, code, 0, "opened") // not "toggled": the row's checkbox is a control of its own
+	out, code = run("get", "text", "li.item")
+	want(out, code, 0, "First item")
+	out, code = run("click", "Search")
+	want(out, code, 1, `"Search" matches 2 controls`)
+	out, code = run("click", "Remember")
+	want(out, code, 1, `no control named exactly "Remember"`, "use its ref")
+	out, code = run("click", "checkbox:Remember me")
+	want(out, code, 0, "✓ click")
+	out, code = run("press", "Space")
+	want(out, code, 0, "✓")
+	out, code = run("is", "checked", "Remember me")
+	want(out, code, 0, "false")
+	// a ref from a page that's gone never names a control on the next
+	snap, _ := e.run("snapshot")
+	old := regexp.MustCompile(`"Next page" \[(@e\d+)\]`).FindStringSubmatch(snap)
+	if old == nil {
+		t.Fatal("no ref for Next page")
+	}
+	out, code = run("click", old[1])
+	want(out, code, 0, "→ Invoice 1")
+	for _, n := range []string{old[1], "@e1", "@e2", "@e3"} {
+		if out, code = run("click", n); code == 0 {
+			t.Errorf("a ref from the old page clicked something on the new one: %s %s", n, out)
+		}
+	}
+	// a file field by CSS selector
+	out, code = run("open", e.site.URL+"/upload")
+	want(out, code, 0, "✓ Upload")
+	out, code = run("upload", "#f", file)
+	want(out, code, 0, "✓ upload")
+	// a covered button is refused, with what covers it
+	out, code = run("open", e.site.URL+"/covered")
+	want(out, code, 0, "✓ Welcome")
+	out, code = run("click", "Continue")
+	want(out, code, 1, "did nothing", "something covers it")
+	// a whole goal, opening the page itself
+	out, code = e.do([]decide.Model{&scripted{pick: func(*decide.Request) (string, string, string) { return "CLICK", "Create", "" }}},
+		"Create a project", "--url", e.site.URL+"/shadow", "--data", "Project name=Apollo", "--until", "text:Created Apollo")
+	t.Log(out)
+	want(out, code, 0, "DONE")
+	out, code = run("close", "--all")
+	want(out, code, 0, "✓ closed 2 tab(s), 0 left")
+	out, code = run("snapshot")
+	want(out, code, 1, "no open tab of yours")
+	b, _ := os.ReadFile(filepath.Join(e.home, "audit", time.Now().UTC().Format("2006-01-02")+".jsonl"))
+	for _, ev := range []string{`"event":"session start"`, `"driver":true`, `"event":"tab open"`, `"event":"navigate"`, `"event":"do fill"`, `"event":"do click"`,
+		`"event":"script"`, `"event":"screenshot"`, `"event":"upload"`, `"event":"session end"`} {
+		if !strings.Contains(string(b), ev) {
+			t.Errorf("audit lacks %s", ev)
+		}
+	}
+	if strings.Contains(string(b), "Ada Lovelace") || strings.Contains(string(b), "SAVE10") {
+		t.Error("the audit holds typed text")
 	}
 }

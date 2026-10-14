@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"cmp"
 	"context"
 	"os"
 	"os/exec"
@@ -35,8 +36,7 @@ func sh(name string, args ...string) string {
 	return string(out)
 }
 
-// findCaller looks the connection up with lsof, reads the process's environment (ps eww) for the markers the
-// agent apps set, and failing that walks up the process tree. noTree: tests, markers only.
+// findCaller looks the connection up with lsof, then the process (callerOf).
 func findCaller(remotePort int, noTree bool) Caller {
 	pid := 0
 	for _, l := range strings.Split(sh("lsof", "-nP", "-Fp", "-iTCP@127.0.0.1:"+strconv.Itoa(remotePort)), "\n") {
@@ -50,7 +50,17 @@ func findCaller(remotePort int, noTree bool) Caller {
 	if pid == 0 {
 		return Caller{}
 	}
-	env := strings.Fields(sh("ps", "eww", "-o", "command=", "-p", strconv.Itoa(pid)))
+	return callerOf(pid, noTree)
+}
+
+// callerOf reads the process's environment for the markers the agent apps set, and failing that walks up the
+// process tree. noTree: tests, markers only.
+func callerOf(pid int, noTree bool) Caller {
+	args, env, _, ok := procInfo(pid)
+	if !ok { // not readable from the kernel here: ps, which prints the command and then the environment
+		env = strings.Fields(sh("ps", "eww", "-o", "command=", "-p", strconv.Itoa(pid)))
+		args = env[:min(2, len(env))]
+	}
 	pick := func(k string) string {
 		for _, v := range env {
 			if strings.HasPrefix(v, k+"=") {
@@ -60,12 +70,12 @@ func findCaller(remotePort int, noTree bool) Caller {
 		return ""
 	}
 	c := Caller{PID: pid, ClaudeSession: pick("CLAUDE_CODE_SESSION_ID"), PaseoAgent: pick("PASEO_AGENT_ID"), Cwd: pick("PASEO_AGENT_CWD"),
-		CodexThread: pick("CODEX_THREAD_ID"), BrowserSession: pick("AGENT_BROWSER_SESSION")}
+		CodexThread: pick("CODEX_THREAD_ID"), BrowserSession: cmp.Or(pick("CHROME_RELAY_SESSION"), pick("AGENT_BROWSER_SESSION"))}
 	if c.Cwd == "" {
 		c.Cwd = pick("PWD")
 	}
-	if len(env) > 0 {
-		c.Command = strings.Join(env[:min(2, len(env))], " ")
+	if len(args) > 0 {
+		c.Command = strings.Join(args[:min(2, len(args))], " ")
 	}
 	for _, a := range agentEnv {
 		for _, v := range env {
@@ -80,15 +90,23 @@ func findCaller(remotePort int, noTree bool) Caller {
 	}
 	p := pid // no markers: walk up the process tree
 	for i := 0; i < 12 && p > 1; i++ {
-		f := strings.Fields(sh("ps", "-o", "ppid=,command=", "-p", strconv.Itoa(p)))
-		if len(f) == 0 {
-			break
+		var command string
+		var ppid int
+		if args, _, pp, ok := procInfo(p); ok {
+			command, ppid = strings.Join(args, " "), pp
+		} else {
+			f := strings.Fields(sh("ps", "-o", "ppid=,command=", "-p", strconv.Itoa(p)))
+			if len(f) == 0 {
+				break
+			}
+			command = strings.Join(f[1:], " ")
+			ppid, _ = strconv.Atoi(f[0])
 		}
-		if m := agentProc.FindStringSubmatch(strings.Join(f[1:], " ")); m != nil {
+		if m := agentProc.FindStringSubmatch(command); m != nil {
 			c.App = strings.ToLower(m[2])
 			return c
 		}
-		p, _ = strconv.Atoi(f[0])
+		p = ppid
 	}
 	return c
 }

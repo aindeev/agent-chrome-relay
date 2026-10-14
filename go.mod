@@ -5,6 +5,7 @@ go 1.25
 require (
 	github.com/1password/onepassword-sdk-go v0.4.1
 	github.com/gorilla/websocket v1.5.3
+	golang.org/x/sys v0.40.0
 	golang.org/x/term v0.39.0
 	rsc.io/qr v0.2.0
 )
@@ -17,6 +18,5 @@ require (
 	github.com/tetratelabs/wabin v0.0.0-20230304001439-f6f874872834 // indirect
 	github.com/tetratelabs/wazero v1.11.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )

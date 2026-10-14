@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/aindeev/agent-chrome-relay/internal/vault"
+	"html"
 	"math"
 	"net/url"
 	"os"
@@ -116,9 +117,18 @@ type Agent struct {
 	orphans              []int
 	blocked              string
 	pageQ                chan pageCall
-	newLogins            map[string]newLogin // ?new references this agent saved: the "confirm password" field gets the same
-	id                   Caller              // who connected: the driver (driver.go) acts for the same agent
-	lastTab              int                 // the tab the agent last sent a command to: the driver's default tab
+	newLogins            map[string]newLogin               // ?new references this agent saved: the "confirm password" field gets the same
+	id                   Caller                            // who connected: the driver (driver.go) acts for the same agent
+	lastTab              int                               // the tab the agent last sent a command to: the driver's default tab
+	held                 bool                              // a session the relay holds for `chrome-relay open` (no agent-browser connection)
+	dialogArm            map[int]dialogAnswer              // tab -> how a held session answers the next confirm or prompt
+	dialogSeen           map[int][]string                  // tab -> dialogs answered since the driver's last action
+	console              map[int][]string                  // tab -> what a held session's pages logged and threw (the last 200 lines)
+	worlds               map[int]int                       // tab -> the driver's own script world in the current document
+	unsettled            map[int]unsettled                 // tab -> the driver's last action there may still be changing the page
+	shown                map[int]map[int]map[string]string // tab -> ref -> the role and label it named in a snapshot
+	shownDoc             map[int]string                    // tab -> the document those refs belong to
+	refNext              int                               // the next ref number the driver's snapshots hand out (never reused)
 }
 
 // newLogin: a password Chrome Relay just made and saved, for the next fields of the same sign-up.
@@ -131,6 +141,7 @@ func (a *Agent) init() {
 	a.tabs, a.child, a.setup, a.paused = map[int]bool{}, map[string]int{}, map[int][]step{}, map[int]*pause{}
 	a.lastInput, a.contexts, a.handoffs, a.filled = map[int]time.Time{}, map[int]map[int]ctxInfo{}, map[int]handoff{}, map[int]string{}
 	a.newLogins = map[string]newLogin{}
+	a.worlds, a.unsettled, a.shown, a.shownDoc = map[int]int{}, map[int]unsettled{}, map[int]map[int]map[string]string{}, map[int]string{}
 	a.targetURLs, a.urls, a.mainFrames, a.popups, a.openerOf = map[int]string{}, map[int]string{}, map[int]string{}, map[string]int{}, map[int][2]int{}
 	// In order: `window.open(); w.location = url` sends "open" then "nav" back to back, and "nav" needs the tab "open" creates.
 	a.pageQ = make(chan pageCall, 1024)
@@ -197,11 +208,17 @@ func trunc(s string, n int) string {
 	return s
 }
 
-// hide a secret this agent typed, as it would appear inside JSON.
+// hide a secret this agent typed, as it would appear inside JSON, also as HTML writes it (an attribute in a page's
+// markup).
 func (a *Agent) hide(secret string) {
-	if len(secret) >= 4 {
-		b, _ := json.Marshal(secret)
-		a.hidden = append(a.hidden, string(b[1:len(b)-1]))
+	if len(secret) < 4 {
+		return
+	}
+	for _, v := range []string{secret, html.EscapeString(secret)} {
+		b, _ := json.Marshal(v)
+		if h := string(b[1 : len(b)-1]); !slices.Contains(a.hidden, h) {
+			a.hidden = append(a.hidden, h)
+		}
 	}
 }
 
@@ -759,9 +776,18 @@ func (a *Agent) onExtEvent(e extEvent) bool {
 	var P map[string]any
 	json.Unmarshal(e.Params, &P)
 	switch e.Method {
+	case "Runtime.consoleAPICalled", "Runtime.exceptionThrown":
+		if a.held {
+			a.logConsole(e.TabID, e.Method, e.Params)
+		}
+	case "Page.javascriptDialogOpening":
+		if a.held { // nobody else is listening for this session: a dialog left open blocks the page
+			a.answerDialog(e.TabID, fmt.Sprint(P["type"]), fmt.Sprint(P["message"]))
+		}
 	case "Page.frameNavigated":
 		if f, ok := P["frame"].(map[string]any); ok && (f["parentId"] == nil || f["parentId"] == "") {
 			a.mainFrames[e.TabID] = fmt.Sprint(f["id"])
+			delete(a.worlds, e.TabID) // a new document: the driver's world went with the old one
 			a.onTargetURL(e.TabID, fmt.Sprint(f["url"]))
 		}
 	case "Page.navigatedWithinDocument":
@@ -786,8 +812,12 @@ func (a *Agent) onExtEvent(e extEvent) bool {
 		case "Runtime.executionContextDestroyed":
 			id, _ := P["executionContextId"].(float64)
 			delete(a.contexts[e.TabID], int(id))
+			if a.worlds[e.TabID] == int(id) {
+				delete(a.worlds, e.TabID)
+			}
 		case "Runtime.executionContextsCleared":
 			a.contexts[e.TabID] = map[int]ctxInfo{}
+			delete(a.worlds, e.TabID)
 		}
 	}
 	if e.Method == "Runtime.bindingCalled" && P["name"] == binding {

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -115,7 +116,38 @@ func Run(o Options) error {
 	}
 	go s.sweep()
 	s.log("bridge listening on", o.Port)
+	// the step-by-step commands also come over a Unix socket, where the kernel names the process at the other end:
+	// no lsof for each command (each is a new process, so a new connection)
+	if err := s.serveSocket(filepath.Join(o.Home, "relay.sock")); err != nil {
+		s.log("no Unix socket for the driver:", err)
+	}
 	return (&http.Server{Handler: s, ConnState: s.connState}).Serve(ln)
+}
+
+// serveSocket: the step-by-step commands (/driver/*) over a Unix socket only this user can open, where the kernel
+// names the process at the other end. Over TCP that takes lsof, a tenth of a second, and each command is a new
+// process, so a new connection.
+func (s *Server) serveSocket(path string) error {
+	os.Remove(path)
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		return errors.New("no way to tell who is at the other end of a Unix socket here")
+	}
+	ul, err := net.Listen("unix", path)
+	if err != nil {
+		return err
+	}
+	os.Chmod(path, 0o600)
+	driverOnly := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/driver/") || websocket.IsWebSocketUpgrade(r) {
+			http.NotFound(w, r)
+			return
+		}
+		s.ServeHTTP(w, r)
+	})
+	go (&http.Server{Handler: driverOnly, ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+		return context.WithValue(ctx, sockPeerKey{}, &sockPeer{pid: peerPID(c)})
+	}}).Serve(ul)
+	return nil
 }
 
 // New prepares a relay from its data folder.
@@ -1013,6 +1045,10 @@ func (s *Server) sweep() {
 	for range time.Tick(time.Minute) {
 		s.mu.Lock()
 		for a := range s.agents {
+			if a.held && len(a.tabs) == 0 && len(a.orphans) == 0 && time.Since(a.last) > 30*time.Minute {
+				s.endHeld(a) // a session the relay held, long since without tabs
+				continue
+			}
 			if time.Since(a.last) > 30*time.Minute && (len(a.tabs) > 0 || len(a.orphans) > 0) {
 				blocked := a.orphans // tabs stuck on a sign-in page: already reported to the agent, still open
 				a.orphans = nil
