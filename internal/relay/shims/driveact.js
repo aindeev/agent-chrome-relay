@@ -70,7 +70,7 @@
   // what the page does after an action, watched for as long as the document lives: how much of the DOM changed and
   // when it last did, and whether a navigation started (the Navigation API's event reaches this world too)
   if (!D.mo) {
-    D.muts = 0; D.lastMut = performance.now();
+    D.muts = 0; D.lastMut = -Infinity; // no change seen yet: a page that never changes is quiet at once
     D.mo = new MutationObserver(r => { D.muts += r.length; D.lastMut = performance.now(); });
     for (const d of D.docs || [document]) { try { D.mo.observe(d, { subtree: true, childList: true, attributes: true, characterData: true }); } catch {} }
     window.navigation?.addEventListener('navigate', ev => { D.nav = { same: ev.destination.sameDocument }; });
