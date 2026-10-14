@@ -988,6 +988,7 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 		var after struct {
 			Navigating bool           `json:"navigating"`
 			Leaving    string         `json:"leaving"`
+			Busy       bool           `json:"busy"`
 			Page       map[string]any `json:"page"`
 		}
 		var rb map[string]any
@@ -998,6 +999,7 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 			delete(rb, "page")
 			delete(rb, "navigating")
 			delete(rb, "leaving")
+			delete(rb, "busy")
 			if q.Node != 0 {
 				out["readback"] = rb
 			} else if rb["changed"] == true {
@@ -1016,7 +1018,9 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 		case err != nil:
 			return nil, err
 		default:
-			a.unsettled[t] = unsettled{from: after.Leaving, until: time.Now().Add(5 * time.Second)}
+			if after.Busy || after.Leaving != "" { // a page that isn't changing needs no wait before the next step
+				a.unsettled[t] = unsettled{from: after.Leaving, until: time.Now().Add(5 * time.Second)}
+			}
 			snap = after.Page
 		}
 	}

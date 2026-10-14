@@ -228,7 +228,9 @@
       let framed = !!q.quick && !listbox && !submits;
       if (!framed) requestAnimationFrame(() => setTimeout(() => { framed = true; }, 0));
       const done = () => {
+        // busy: the DOM changed within the last 50 ms, so the next step waits for it to be quiet (otherwise it needn't)
         const out = { navigating: !!(D.nav && !D.nav.same), leaving: leaving && location.href.split('#')[0] === from ? from : '',
+          busy: performance.now() - D.lastMut <= 50,
           page: { url: location.href, title: document.title, key: location.href + '|' + performance.timeOrigin } };
         if (!q.node) return resolve({ ...out, changed: D.muts > (b.muts ?? D.muts) });
         if (!e?.isConnected) return resolve({ ...out, gone: true });
