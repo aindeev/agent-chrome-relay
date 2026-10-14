@@ -210,7 +210,8 @@
   if (phase === 'after') {
     // right after the input: what it did. A change made by the page's own handler is already in the DOM; otherwise
     // give it a frame to make one (one animation frame, or 20 ms where frames don't run, as in a background tab).
-    // A step command (q.quick) only gives it the current task: it says "no change yet", and the agent's next look
+    // A step command (q.quick) doesn't wait at all: a timer can take tens of milliseconds in a background tab, and
+    // what the page's handler did is already there. It says "no change yet" otherwise, and the agent's next look
     // waits for the page anyway. The wait for the page to finish (quiet) comes before the next step, while
     // the agent is thinking. A fill into a combobox waits for its options (at most 1.5 s), which the next step needs.
     const b = D.before || {};
@@ -221,9 +222,11 @@
     const listbox = e && e.getAttribute?.('role') === 'combobox' && q.kind === 'fill';
     return new Promise(resolve => {
       const t0 = performance.now();
-      let framed = false;
-      if (q.quick) setTimeout(() => { framed = true; }, 0);
-      else requestAnimationFrame(() => setTimeout(() => { framed = true; }, 0));
+      // a form's submit button, a link or a key (Enter) may be starting a navigation the page announces a moment later: those
+      // still get their frame
+      const submits = q.kind === 'key' || (q.kind === 'click' && (leaving || (e?.form && ['submit', 'image'].includes(e.type))));
+      let framed = !!q.quick && !listbox && !submits;
+      if (!framed) requestAnimationFrame(() => setTimeout(() => { framed = true; }, 0));
       const done = () => {
         const out = { navigating: !!(D.nav && !D.nav.same), leaving: leaving && location.href.split('#')[0] === from ? from : '',
           page: { url: location.href, title: document.title, key: location.href + '|' + performance.timeOrigin } };
