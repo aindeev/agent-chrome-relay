@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -74,6 +76,17 @@ func (c *cli) newDriver() (*driver, error) {
 		return nil, err
 	}
 	tr := &http.Transport{MaxIdleConnsPerHost: 1, MaxConnsPerHost: 1, IdleConnTimeout: 5 * time.Minute}
+	// the relay's Unix socket when it has one: there it knows who's calling from the kernel, at once; over TCP it
+	// has to look the connection up (lsof), which costs a tenth of a second for every command
+	if sock := filepath.Join(c.Home, "relay.sock"); fileExists(sock) {
+		tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			if conn, err := d.DialContext(ctx, "unix", sock); err == nil {
+				return conn, nil
+			}
+			return d.DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", c.Port)) // a relay from before the socket
+		}
+	}
 	// a fill from 1Password waits for the person's approval (Touch ID, or their iPhone): allow for it
 	return &driver{c: c, tok: tok, client: &http.Client{Transport: tr, Timeout: 6 * time.Minute}}, nil
 }
@@ -245,13 +258,23 @@ func (c *cli) drive(cmd string) error {
 	}
 	// act on a control and say what happened
 	act := func(kind, what string, body map[string]any, need string) error {
-		page, err := observe()
-		if err != nil {
-			return err
-		}
-		w, shown, err := where(page, what, need)
-		if err != nil {
-			return err
+		// a ref goes straight to the relay, which knows what it named in the snapshot the agent saw (and refuses it
+		// if that changed); a label or selector is looked up in a snapshot taken now
+		var page decide.Page
+		var w map[string]any
+		var shown string
+		var err error
+		_, drag := body["dropOn"]
+		if m := refRe.FindStringSubmatch(what); m != nil && !drag {
+			n, _ := strconv.Atoi(m[1])
+			w, shown = map[string]any{"node": n, "byRef": true}, fmt.Sprintf("@e%d", n)
+		} else {
+			if page, err = observe(); err != nil {
+				return err
+			}
+			if w, shown, err = where(page, what, need); err != nil {
+				return err
+			}
 		}
 		for k, v := range w {
 			body[k] = v
@@ -274,6 +297,10 @@ func (c *cli) drive(cmd string) error {
 		if err := d.call("act", body, &res); err != nil {
 			return err
 		}
+		if res.Element.Role != "" && e.Role == "" { // by ref: as the relay found it
+			e.Role, e.Label = res.Element.Role, res.Element.Label
+			shown = fmt.Sprintf("%s %q [%s]", e.Role, cut(e.Label, 60), shown)
+		}
 		if res.Stale != "" || res.Refused != "" {
 			return fmt.Errorf("%s %s did nothing: %s%s", kind, shown, res.Stale, res.Refused)
 		}
@@ -287,12 +314,12 @@ func (c *cli) drive(cmd string) error {
 		case (kind == "fill") && !strings.HasPrefix(strings.TrimSpace(fmt.Sprint(body["text"])), "op://") && e.Role != "password" &&
 			res.Readback.Value != nil && fmt.Sprint(res.Readback.Value) != fmt.Sprint(body["text"]):
 			c.printf(" (the field now shows %q)\n", cut(fmt.Sprint(res.Readback.Value), 80))
-		case res.Readback.Changed || res.Readback.Gone || res.Page.Key != page.Key:
+		case res.Readback.Changed || res.Readback.Gone || (page.Key != "" && res.Page.Key != page.Key):
 			c.printf(" (the page changed)\n")
 		case kind == "hover" || kind == "upload":
 			c.printf("\n")
 		default:
-			c.printf(" (nothing on the page changed)\n")
+			c.printf(" (no change on the page yet)\n")
 		}
 		if opt["snapshot"] != "" {
 			c.printPage(res.Page, false)
@@ -731,3 +758,5 @@ func (c *cli) drive(cmd string) error {
 	}
 	return nil
 }
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }

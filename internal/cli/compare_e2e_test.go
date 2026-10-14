@@ -118,6 +118,26 @@ func execTool(env []string, bin string, pre ...string) func(time.Duration, ...st
 }
 
 // abRef finds agent-browser's ref for a control by (part of) its name, from `snapshot -i --json`.
+// crRef finds chrome-relay's ref for a control by its exact name, from `snapshot --json`.
+func crRef(cr tool, name string) string {
+	out, _, _ := cr.run(20*time.Second, "snapshot", "--json")
+	var p struct {
+		Elements []struct {
+			Node  int
+			Label string
+		}
+	}
+	if i := strings.Index(out, "{"); i >= 0 {
+		json.Unmarshal([]byte(out[i:]), &p)
+	}
+	for _, e := range p.Elements {
+		if e.Label == name {
+			return fmt.Sprintf("@e%d", e.Node)
+		}
+	}
+	return name
+}
+
 func abRef(ab tool, name string, roles ...string) string {
 	out, _, _ := ab.run(20*time.Second, "snapshot", "-i", "--json")
 	var snap struct {
@@ -315,8 +335,11 @@ func TestCompareWithAgentBrowser(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		measure(cr, "open a page", "open", site.URL+"/s-form")
 		measure(cr, "snapshot", "snapshot")
-		measure(cr, "fill", "fill", "City", "Lisbon")
-		measure(cr, "click", "click", "Go")
+		// a ref from the snapshot, as agent-browser's are below (looking it up isn't timed for either)
+		measure(cr, "fill", "fill", crRef(cr, "City"), "Lisbon")
+		measure(cr, "click", "click", crRef(cr, "Go"))
+		measure(cr, "fill by label", "fill", "City", "Lisbon")
+		measure(cr, "click by label", "click", "Go")
 		measure(cr, "read text", "get", "text")
 	}
 	// what each sees on real pages
@@ -446,8 +469,14 @@ func TestCompareWithAgentBrowser(t *testing.T) {
 		return d[len(d)/2]
 	}
 	b.WriteString("\n## Time per command (median of 5, a real process each time)\n\n| Command | agent-browser | chrome-relay |\n|---|---|---|\n")
-	for _, l := range []string{"open a page", "snapshot", "fill", "click", "read text"} {
-		fmt.Fprintf(&b, "| %s | %d ms | %d ms |\n", l, median(timing["agent-browser"][l]).Milliseconds(), median(timing["chrome-relay"][l]).Milliseconds())
+	for _, l := range []string{"open a page", "snapshot", "fill", "click", "fill by label", "click by label", "read text"} {
+		cell := func(d []time.Duration) string {
+			if len(d) == 0 {
+				return "–"
+			}
+			return fmt.Sprintf("%d ms", median(d).Milliseconds())
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s |\n", l, cell(timing["agent-browser"][l]), cell(timing["chrome-relay"][l]))
 	}
 	if len(sites) > 0 {
 		b.WriteString("\n## Controls each lists on real pages (by name; buttons, links, fields and the like)\n\n| Page | both | only agent-browser | only chrome-relay |\n|---|---|---|---|\n")

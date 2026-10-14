@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,6 +56,7 @@ type driveReq struct {
 	Params   json.RawMessage `json:"params"` // cdp
 	Clear    bool            `json:"clear"`  // console: forget what was shown
 	Brief    bool            `json:"brief"`  // act: the page's address and title afterwards, not a whole snapshot
+	ByRef    bool            `json:"byRef"`  // act: Node is a ref the agent took from a snapshot: it must still name what it did
 }
 
 type driveExpect struct {
@@ -87,7 +89,22 @@ func (s *Server) connState(c net.Conn, st http.ConnState) {
 	}
 }
 
+// sockPeer: a connection on the driver's Unix socket, and who's at the other end (looked up once per connection).
+type sockPeerKey struct{}
+type sockPeer struct {
+	pid  int
+	once sync.Once
+	c    Caller
+}
+
 func (s *Server) driverCaller(r *http.Request) Caller {
+	if p, ok := r.Context().Value(sockPeerKey{}).(*sockPeer); ok {
+		if p.pid <= 0 {
+			return Caller{}
+		}
+		p.once.Do(func() { p.c = callerOf(p.pid, os.Getenv("CHROME_RELAY_CHECK_TREE") == "0") })
+		return p.c
+	}
 	callers.Lock()
 	cc, ok := callers.m[r.RemoteAddr]
 	callers.Unlock()
@@ -250,6 +267,10 @@ func (s *Server) serveDriver(w http.ResponseWriter, r *http.Request) {
 	}
 	var out map[string]any
 	var err error
+	switch r.URL.Path {
+	case "/driver/act", "/driver/check", "/driver/text", "/driver/query", "/driver/eval", "/driver/screenshot", "/driver/cdp":
+		a.settle(t) // what the last action set going has finished (observe does it itself)
+	}
 	switch r.URL.Path {
 	case "/driver/observe":
 		out, err = a.observe(t, q.Limit)
@@ -645,6 +666,27 @@ func (a *Agent) screenshot(t int, full bool) (map[string]any, error) {
 	return map[string]any{"png": res.Data}, nil
 }
 
+// waitNewDocument: until the tab shows another document than the one with this key (address|timeOrigin), and it
+// has loaded; false if none came within d. Must hold s.mu.
+func (a *Agent) waitNewDocument(t int, key string, d time.Duration) bool {
+	_, origin, _ := strings.Cut(key, "|")
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		var now string
+		if err := a.eval(t, "String(performance.timeOrigin)", false, &now); errors.Is(err, errNavigated) || (err == nil && now != origin) {
+			a.waitLoad(t)
+			return true
+		}
+		a.s.mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+		a.s.mu.Lock()
+		if !a.tabs[t] {
+			return false
+		}
+	}
+	return false
+}
+
 // waitLoad: after a navigation, until the new document is complete (at most 15 s).
 func (a *Agent) waitLoad(t int) {
 	deadline := time.Now().Add(15 * time.Second)
@@ -662,7 +704,53 @@ func (a *Agent) waitLoad(t int) {
 	}
 }
 
+// remember what each ref in a snapshot named, for acting on refs later without a new snapshot. Refs are never
+// reused, so the table only grows within a document; a new document starts it over. Must hold s.mu.
+func (a *Agent) remember(t int, snap map[string]any) {
+	doc := ""
+	if k, ok := snap["key"].(string); ok {
+		_, doc, _ = strings.Cut(k, "|")
+	}
+	if a.shown[t] == nil || a.shownDoc[t] != doc {
+		a.shown[t], a.shownDoc[t] = map[int]map[string]string{}, doc
+	}
+	els, _ := snap["elements"].([]any)
+	for _, x := range els {
+		el, _ := x.(map[string]any)
+		n, _ := el["node"].(float64)
+		role, _ := el["role"].(string)
+		label, _ := el["label"].(string)
+		if n > 0 {
+			a.shown[t][int(n)] = map[string]string{"role": role, "label": label}
+		}
+	}
+}
+
+// unsettled: an action's page may still be busy (or, after a click on a link, about to leave): the next step waits.
+type unsettled struct {
+	from  string // the address a click on a link should take the page away from
+	until time.Time
+}
+
+// settle: before reading or acting on a page an action changed, until it's quiet (and has left, after a link). Usually
+// it is already: the agent took longer than that to decide its next step. Must hold s.mu.
+func (a *Agent) settle(t int) {
+	u, ok := a.unsettled[t]
+	if !ok {
+		return
+	}
+	delete(a.unsettled, t)
+	wait := max(0, time.Until(u.until).Milliseconds())
+	if u.from == "" {
+		wait = 0
+	}
+	if err := a.actScript(t, "quiet", map[string]any{"from": u.from, "wait": wait}, true, nil); errors.Is(err, errNavigated) {
+		a.waitLoad(t)
+	}
+}
+
 func (a *Agent) observe(t int, limit ...int) (map[string]any, error) {
+	a.settle(t)
 	var snap map[string]any
 	n := 0
 	if len(limit) > 0 && limit[0] > 0 {
@@ -679,6 +767,7 @@ func (a *Agent) observe(t int, limit ...int) (map[string]any, error) {
 			if next, ok := snap["next"].(float64); ok && int(next) > a.refNext {
 				a.refNext = int(next)
 			}
+			a.remember(t, snap)
 			delete(snap, "next")
 			return snap, nil
 		}
@@ -714,6 +803,7 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 		}
 		a.waitLoad(t)
 	case "scroll":
+		a.actScript(t, "arm", map[string]any{}, false, nil)
 		dy := 600
 		if n, err := strconv.Atoi(q.Option); err == nil && n > 0 {
 			dy = n
@@ -742,6 +832,7 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown key %q (Enter, Tab, Escape, Space, Backspace, Delete, Arrow*, Home, End, PageUp, PageDown)", q.Text)
 		}
+		a.actScript(t, "arm", map[string]any{}, false, nil)
 		key := q.Text
 		down := map[string]any{"type": "keyDown", "key": key, "code": q.Text, "windowsVirtualKeyCode": code, "nativeVirtualKeyCode": code}
 		switch q.Text {
@@ -784,11 +875,19 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 			return nil, err
 		}
 	case "click", "dblclick", "fill", "type", "select", "hover", "upload":
+		if q.ByRef && q.Expect == nil {
+			exp, ok := a.shown[t][q.Node]
+			if !ok {
+				return map[string]any{"stale": fmt.Sprintf("no control @e%d on this page: take a new snapshot (refs don't carry over to a new page)", q.Node)}, nil
+			}
+			q.Expect = &driveExpect{Role: exp["role"], Label: exp["label"]}
+		}
 		var prep struct {
 			Stale, Refused string
 			X, Y           float64
-			Done           bool
+			Done, Focused  bool
 			Node           int
+			El             map[string]string
 		}
 		if err := a.actScript(t, "prepare", map[string]any{"node": q.Node, "selector": q.Selector, "kind": q.Kind, "option": q.Option, "expect": q.Expect}, false, &prep); err != nil {
 			if errors.Is(err, errNavigated) {
@@ -802,6 +901,9 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 		}
 		if prep.Node != 0 {
 			q.Node = prep.Node // a selector's element, for the read-back below
+		}
+		if prep.El != nil {
+			out["element"] = prep.El
 		}
 		if q.Kind == "upload" {
 			// the file field itself, by reference: files are set on it, nothing is clicked
@@ -830,7 +932,7 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 			if err := a.input(t, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": prep.X, "y": prep.Y}); err != nil {
 				return nil, err
 			}
-		} else if !prep.Done {
+		} else if !prep.Done && !prep.Focused { // a text field the page script focused takes the text without a click
 			events := []string{"mouseMoved", "mousePressed", "mouseReleased"}
 			if q.Kind == "dblclick" {
 				events = append(events, "mousePressed", "mouseReleased")
@@ -846,16 +948,20 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 			}
 		}
 		if q.Kind == "type" { // add to what's there, at the end
-			a.input(t, "Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "End", "code": "End", "windowsVirtualKeyCode": 35, "commands": []string{"moveToEndOfDocument"}})
-			a.input(t, "Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "End", "code": "End", "windowsVirtualKeyCode": 35})
+			if !prep.Focused {
+				a.input(t, "Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "End", "code": "End", "windowsVirtualKeyCode": 35, "commands": []string{"moveToEndOfDocument"}})
+				a.input(t, "Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "End", "code": "End", "windowsVirtualKeyCode": 35})
+			}
 			if err := a.input(t, "Input.insertText", map[string]any{"text": q.Text}); err != nil {
 				return nil, err
 			}
 		}
 		if q.Kind == "fill" {
-			mod := 4 // ⌘ on a Mac: select what's there, so the text replaces it
-			a.input(t, "Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "a", "code": "KeyA", "modifiers": mod, "windowsVirtualKeyCode": 65, "commands": []string{"selectAll"}})
-			a.input(t, "Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "a", "code": "KeyA", "modifiers": mod, "windowsVirtualKeyCode": 65})
+			if !prep.Focused { // the page script selected what's there already
+				mod := 4 // ⌘ on a Mac: select what's there, so the text replaces it
+				a.input(t, "Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "a", "code": "KeyA", "modifiers": mod, "windowsVirtualKeyCode": 65, "commands": []string{"selectAll"}})
+				a.input(t, "Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "a", "code": "KeyA", "modifiers": mod, "windowsVirtualKeyCode": 65})
+			}
 			text := q.Text
 			if text == "" {
 				a.input(t, "Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8})
@@ -867,23 +973,50 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 	default:
 		return nil, fmt.Errorf("unknown action %q", q.Kind)
 	}
+	// what the input did, at once; the wait for the page to finish comes before the next step (settle)
 	navigated := false
-	if err := a.actScript(t, "settle", map[string]any{"node": q.Node, "kind": q.Kind}, true, nil); errors.Is(err, errNavigated) {
-		navigated = true
-	}
-	if q.Node != 0 && !navigated {
+	var snap map[string]any
+	switch q.Kind {
+	case "navigate", "back", "reload": // waited for the new page already
+	default:
+		var after struct {
+			Navigating bool           `json:"navigating"`
+			Leaving    string         `json:"leaving"`
+			Page       map[string]any `json:"page"`
+		}
 		var rb map[string]any
-		if err := a.actScript(t, "readback", map[string]any{"node": q.Node}, false, &rb); err == nil {
-			out["readback"] = rb
-		} else if errors.Is(err, errNavigated) {
+		err := a.actScript(t, "after", map[string]any{"node": q.Node, "kind": q.Kind, "quick": q.Brief}, true, &rb)
+		if err == nil {
+			b, _ := json.Marshal(rb)
+			json.Unmarshal(b, &after)
+			delete(rb, "page")
+			delete(rb, "navigating")
+			delete(rb, "leaving")
+			if q.Node != 0 {
+				out["readback"] = rb
+			} else if rb["changed"] == true {
+				out["readback"] = map[string]any{"changed": true}
+			}
+		}
+		switch {
+		case errors.Is(err, errNavigated):
 			navigated = true
+			a.waitLoad(t)
+		case after.Navigating: // the page started to leave: until the next one is there (a cancelled one never comes)
+			navigated = true
+			if !a.waitNewDocument(t, fmt.Sprint(after.Page["key"]), 5*time.Second) {
+				a.unsettled[t] = unsettled{from: strings.Split(fmt.Sprint(after.Page["url"]), "#")[0], until: time.Now().Add(10 * time.Second)}
+			}
+		case err != nil:
+			return nil, err
+		default:
+			a.unsettled[t] = unsettled{from: after.Leaving, until: time.Now().Add(5 * time.Second)}
+			snap = after.Page
 		}
 	}
-	if navigated {
-		a.waitLoad(t)
-	}
-	var snap map[string]any
-	if q.Brief {
+	switch {
+	case q.Brief && snap != nil: // the address and title "after" read
+	case q.Brief:
 		// the key as a snapshot now would have it: a new address or a new document is a changed page
 		const brief = `({url: location.href, title: document.title, key: location.href + "|" + performance.timeOrigin})`
 		err := a.eval(t, brief, false, &snap)
@@ -894,7 +1027,7 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-	} else {
+	default:
 		var err error
 		if snap, err = a.observe(t); err != nil {
 			return nil, err

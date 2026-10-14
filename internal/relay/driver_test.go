@@ -2,11 +2,14 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -155,5 +158,66 @@ func TestDriverActsLikeTheAgent(t *testing.T) {
 	}
 	if strings.Contains(audit, "hunter2") || strings.Contains(audit, "op://Agents/GitHub") && strings.Contains(audit, `"do fill","tab":`+fmt.Sprint(tab)+`,"label":"op://`) {
 		t.Error("audit holds a secret or the reference as the label:", audit)
+	}
+}
+
+// The driver's Unix socket: only /driver/*, still behind the secret, and the caller is the process at the other end,
+// as the kernel names it (here, this test).
+func TestDriverSocket(t *testing.T) {
+	h := newHarness(t)
+	sock := filepath.Join(t.TempDir(), "relay.sock")
+	if err := h.s.serveSocket(sock); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(sock); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("socket mode: %v %v", fi, err)
+	}
+	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+	}}}
+	get := func(path string) int {
+		res, err := client.Post("http://relay"+path, "application/json", strings.NewReader("{}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if code := get("/json/version?token=test-secret"); code != http.StatusNotFound {
+		t.Error("not a driver call, over the socket:", code)
+	}
+	if code := get("/driver/tabs"); code != http.StatusForbidden {
+		t.Error("no secret:", code)
+	}
+	// with the secret: who is calling comes from the kernel, not from what the request says
+	ul, err := net.Listen("unix", filepath.Join(t.TempDir(), "peer.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ul.Close()
+	got := make(chan int, 1)
+	go func() {
+		c, err := ul.Accept()
+		if err != nil {
+			got <- -1
+			return
+		}
+		got <- peerPID(c)
+		c.Close()
+	}()
+	c, err := net.Dial("unix", ul.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	seen := <-got
+	if runtime.GOOS == "darwin" && seen != os.Getpid() {
+		t.Errorf("peer pid %d, want %d", seen, os.Getpid())
+	}
+	if runtime.GOOS == "darwin" {
+		args, env, ppid, ok := procInfo(os.Getpid())
+		if !ok || len(args) == 0 || !strings.Contains(args[0], "relay.test") || len(env) == 0 || ppid != os.Getppid() {
+			t.Errorf("procInfo: %v %q %d env=%d", ok, args, ppid, len(env))
+		}
 	}
 }

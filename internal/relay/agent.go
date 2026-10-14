@@ -117,15 +117,18 @@ type Agent struct {
 	orphans              []int
 	blocked              string
 	pageQ                chan pageCall
-	newLogins            map[string]newLogin  // ?new references this agent saved: the "confirm password" field gets the same
-	id                   Caller               // who connected: the driver (driver.go) acts for the same agent
-	lastTab              int                  // the tab the agent last sent a command to: the driver's default tab
-	held                 bool                 // a session the relay holds for `chrome-relay open` (no agent-browser connection)
-	dialogArm            map[int]dialogAnswer // tab -> how a held session answers the next confirm or prompt
-	dialogSeen           map[int][]string     // tab -> dialogs answered since the driver's last action
-	console              map[int][]string     // tab -> what a held session's pages logged and threw (the last 200 lines)
-	worlds               map[int]int          // tab -> the driver's own script world in the current document
-	refNext              int                  // the next ref number the driver's snapshots hand out (never reused)
+	newLogins            map[string]newLogin               // ?new references this agent saved: the "confirm password" field gets the same
+	id                   Caller                            // who connected: the driver (driver.go) acts for the same agent
+	lastTab              int                               // the tab the agent last sent a command to: the driver's default tab
+	held                 bool                              // a session the relay holds for `chrome-relay open` (no agent-browser connection)
+	dialogArm            map[int]dialogAnswer              // tab -> how a held session answers the next confirm or prompt
+	dialogSeen           map[int][]string                  // tab -> dialogs answered since the driver's last action
+	console              map[int][]string                  // tab -> what a held session's pages logged and threw (the last 200 lines)
+	worlds               map[int]int                       // tab -> the driver's own script world in the current document
+	unsettled            map[int]unsettled                 // tab -> the driver's last action there may still be changing the page
+	shown                map[int]map[int]map[string]string // tab -> ref -> the role and label it named in a snapshot
+	shownDoc             map[int]string                    // tab -> the document those refs belong to
+	refNext              int                               // the next ref number the driver's snapshots hand out (never reused)
 }
 
 // newLogin: a password Chrome Relay just made and saved, for the next fields of the same sign-up.
@@ -138,6 +141,7 @@ func (a *Agent) init() {
 	a.tabs, a.child, a.setup, a.paused = map[int]bool{}, map[string]int{}, map[int][]step{}, map[int]*pause{}
 	a.lastInput, a.contexts, a.handoffs, a.filled = map[int]time.Time{}, map[int]map[int]ctxInfo{}, map[int]handoff{}, map[int]string{}
 	a.newLogins = map[string]newLogin{}
+	a.worlds, a.unsettled, a.shown, a.shownDoc = map[int]int{}, map[int]unsettled{}, map[int]map[int]map[string]string{}, map[int]string{}
 	a.targetURLs, a.urls, a.mainFrames, a.popups, a.openerOf = map[int]string{}, map[int]string{}, map[int]string{}, map[string]int{}, map[int][2]int{}
 	// In order: `window.open(); w.location = url` sends "open" then "nav" back to back, and "nav" needs the tab "open" creates.
 	a.pageQ = make(chan pageCall, 1024)

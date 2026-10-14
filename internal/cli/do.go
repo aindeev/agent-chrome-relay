@@ -187,7 +187,11 @@ type actResult struct {
 	Navigated bool        `json:"navigated"`
 	Dialogs   []string    `json:"dialogs"`
 	Page      decide.Page `json:"page"`
-	Readback  struct {
+	Element   struct {
+		Role  string `json:"role"`
+		Label string `json:"label"`
+	} `json:"element"` // what was acted on, as the page names it now
+	Readback struct {
 		Changed bool  `json:"changed"`
 		Gone    bool  `json:"gone"`
 		Value   any   `json:"value"`
@@ -214,13 +218,11 @@ func (c *cli) do() error {
 	if err != nil {
 		return err
 	}
-	tok, err := c.token()
+	d, err := c.newDriver()
 	if err != nil {
 		return err
 	}
-	tr := &http.Transport{MaxIdleConnsPerHost: 1, MaxConnsPerHost: 1, IdleConnTimeout: 5 * time.Minute}
-	// a fill from 1Password waits for the person's approval (Touch ID, or their iPhone): allow for it
-	d := &driver{c: c, tok: tok, client: &http.Client{Transport: tr, Timeout: 6 * time.Minute}, tab: o.tab}
+	d.tab = o.tab
 	models, names := c.deciders(o.decider)
 	defer func() {
 		for _, m := range models {
