@@ -689,14 +689,20 @@ func (a *Agent) waitNewDocument(t int, key string, d time.Duration) bool {
 
 // waitLoad: after a navigation, until the new document is complete (at most 15 s).
 func (a *Agent) waitLoad(t int) {
-	deadline := time.Now().Add(15 * time.Second)
+	start := time.Now()
+	deadline := start.Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		var state string
 		if a.eval(t, "document.readyState", false, &state) == nil && state == "complete" {
 			return
 		}
 		a.s.mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
+		// often, at first (most pages load within a second: polling every 100 ms added 50 ms to each on average)
+		if time.Since(start) < 2*time.Second {
+			time.Sleep(10 * time.Millisecond)
+		} else {
+			time.Sleep(100 * time.Millisecond)
+		}
 		a.s.mu.Lock()
 		if !a.tabs[t] {
 			return
