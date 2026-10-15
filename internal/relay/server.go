@@ -341,9 +341,9 @@ func (s *Server) vaultSettings() vault.Settings {
 // copy can have it.
 const WebStoreID = "mdglmmedlbkjphgolcejpphnbclkfnom"
 
-// WebStoreLive: the store has published it. Until then setup, doctor and the docs install the unpacked copy, and
-// call the store's "coming soon"; the relay accepts the store's ID either way, so installs work the day it's out.
-const WebStoreLive = false
+// WebStoreLive: the store has published it (October 15, 2026), so setup and doctor install the store's copy. The relay
+// accepts the store's ID either way.
+const WebStoreLive = true
 
 // WebStoreURL is where people install it.
 func WebStoreURL() string { return "https://chromewebstore.google.com/detail/" + WebStoreID }

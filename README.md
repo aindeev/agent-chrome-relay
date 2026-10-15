@@ -44,9 +44,9 @@ it's no longer required. How the two compare: [Step by step](#step-by-step-chrom
 
 It's opt-in: nothing installs the extension for you, and it only runs on Macs whose owner set it up.
 
-**Status.** Today you build Chrome Relay from source (below). The Chrome extension is in Chrome Web Store review and
-the iPhone app, Chrome Relay Approve, is in App Store review: both are coming soon, and until then you load the
-extension from your clone and build the iPhone app with Xcode. Signing in with a password manager works with
+**Status.** The Chrome extension is in the [Chrome Web Store](https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom) (unlisted: only at that link). The
+Mac service is built from source on your Mac (below). The iPhone app, Chrome Relay Approve, is in App Store review:
+until it's out, you build it with Xcode. Signing in with a password manager works with
 **1Password only** for now.
 
 **The core** is background tabs with your logins, `chrome-relay do`, Google sign-in hops and an audit trail.
@@ -106,10 +106,13 @@ lists yours; a free one comes with an Apple ID in Xcode → Settings → Account
 several, pick one with `./build --identity "<name>"`; it's remembered. `chrome-relay doctor` says which build
 you have.
 
-Then, **in each Chrome profile agents should use**: open `chrome://extensions`, turn on **Developer mode**,
-**Load unpacked**, pick the `extension` folder of your clone, and **pin** it (puzzle-piece icon → pin) so you see its
-badge. Check with `chrome-relay doctor`. A Chrome Web Store version is in review: once it's out, you can install it
-from there instead (never both in one profile), and Chrome keeps it up to date.
+Then, **in each Chrome profile agents should use**: install **[Chrome Relay from the Chrome Web Store](https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom)**
+and **pin** it (puzzle-piece icon → pin) so you see its badge. Check with `chrome-relay doctor`. Chrome keeps it up to
+date, and applies an update once no agent tab is open.
+
+Prefer your clone's own copy (to read every line that runs, or to change it)? Instead of the store's, never beside it:
+open `chrome://extensions`, turn on **Developer mode**, **Load unpacked**, and pick the `extension` folder of your
+clone. Both are the same code: the store's is `./package-extension` of this folder.
 
 After `git pull`: `./build && chrome-relay update` (rebuilds, restarts the relay, reloads the extension in every
 profile; the Web Store's copy checks the store instead).
@@ -245,8 +248,8 @@ Two checks on every agent connection:
    (`CLAUDECODE`, `CODEX_*`, `CURSOR_*`, `PASEO_AGENT_ID`), then its parent processes.
 
 Connections that carry a browser `Origin` header (a web page) are refused even with the secret. Only **Chrome
-Relay's extension** may connect as the extension: **this checkout's** unpacked copy, or the Web Store's copy once it's
-published (its ID is the store's, which no other extension can have) (for the unpacked one, Chrome derives the ID from its folder;
+Relay's extension** may connect as the extension: the Web Store's copy (its ID is the store's,
+which no other extension can have) or **this checkout's** unpacked copy (for the unpacked one, Chrome derives the ID from its folder;
 `setup` records it in `~/.chrome-relay/config.json`). The relay checks the connection's
 `Origin: chrome-extension://<id>` (which pages cannot fake), and the connecting process must be Chrome. Trusting the
 store's copy means trusting its releases: each is `./package-extension` of a commit in this repo, and Google reviews
