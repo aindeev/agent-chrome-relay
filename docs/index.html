@@ -129,14 +129,14 @@
           <span class="lights" aria-hidden="true"><i></i><i></i></span>
           <span class="term-title">what your agent runs</span>
         </div>
-        <pre class="term-body" id="demoTerm" aria-live="off"><span class="p">$</span> agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com
+        <pre class="term-body" id="demoTerm" aria-live="off"><span class="p">$</span> chrome-relay open https://app.example.com --profile you@company.com
 <span class="ok">✓</span> Example App
   <span class="dim">https://app.example.com/</span>  <span class="t">0.6 s</span>
 <span class="p">$</span> chrome-relay do "Start a new report" --until "text:New report"
 <span class="dim"> 1. click button "New report"  (jev 0.91, 310 ms)</span>
 <span class="ok">✓</span> DONE in 1 step, 0.4 s: --until holds
-<span class="p">$</span> agent-browser close
-<span class="ok">✓</span> Browser closed</pre>
+<span class="p">$</span> chrome-relay close --all
+<span class="ok">✓</span> closed 1 tab(s), 0 left</pre>
       </div>
 
       <div class="chrome" aria-hidden="true">
@@ -190,7 +190,7 @@
     <div class="bento">
       <article class="tile tile--wide reveal">
         <h3>Works with the agent you already use</h3>
-        <p>Claude Code, Codex, Cursor and Paseo can all use it today. They drive Chrome through the open-source <code>agent-browser</code> tool, Chrome’s standard DevTools protocol and Chrome Relay’s own <code>chrome-relay do</code>. You are not tied to one AI company’s browser extension, and switching agents changes nothing. Several agents can work at once, and each one sees only its own tabs.</p>
+        <p>Claude Code, Codex, Cursor, Paseo and pi can all use it today. They drive Chrome with Chrome Relay’s own commands, from a single click to a whole goal with <code>chrome-relay do</code>, or with the open-source <code>agent-browser</code> through Chrome’s standard DevTools protocol. You are not tied to one AI company’s browser extension, and switching agents changes nothing. Several agents can work at once, and each one sees only its own tabs.</p>
         <ul class="lanes" aria-hidden="true">
           <li><span>Claude Code</span><i></i><i></i></li>
           <li><span>Codex</span><i></i></li>
@@ -264,17 +264,17 @@
     <div class="section-head reveal">
       <p class="plate">How it works</p>
       <h2 id="how-title">How a command reaches <span class="hl">your Chrome</span></h2>
-      <p class="lede">Your agent runs <code>agent-browser</code> commands, or hands over a whole goal with <code>chrome-relay do</code>. A small service on your Mac passes them to the Chrome Relay extension, which carries them out in the agent’s own tab.</p>
+      <p class="lede">Your agent runs <code>chrome-relay</code> commands one step at a time, or hands over a whole goal with <code>chrome-relay do</code>. A small service on your Mac passes them to the Chrome Relay extension, which carries them out in the agent’s own tab.</p>
     </div>
 
     <div class="night reveal">
       <ol class="pipeline" aria-label="Data path from the agent to the browser tab">
         <li class="node">
           <span class="node-k">CLI</span>
-          <b>agent-browser</b>
-          <span class="node-s">or chrome-relay do</span>
+          <b>chrome-relay</b>
+          <span class="node-s">open, click, fill, do</span>
         </li>
-        <li class="wire" aria-hidden="true"><span class="wire-label">ws</span><i></i></li>
+        <li class="wire" aria-hidden="true"><span class="wire-label">socket</span><i></i></li>
         <li class="node node--hot">
           <span class="node-k">background service</span>
           <b>relay</b>
@@ -395,7 +395,7 @@
     <div class="section-head reveal">
       <p class="plate">Install</p>
       <h2 id="install-title">Set it up <span class="hl">once per Mac</span></h2>
-      <p class="lede">Today you build Chrome Relay from source, which takes about two minutes. You need macOS, Google Chrome, <a href="https://go.dev/dl/">Go</a> and <a href="https://github.com/vercel-labs/agent-browser">agent-browser</a>. For the full password experience (signing in with 1Password, passkeys in your Mac’s Secure Enclave, approving on your iPhone) you also need Xcode’s command line tools; all of that is optional.</p>
+      <p class="lede">Today you build Chrome Relay from source, which takes about two minutes. You need macOS, Google Chrome and <a href="https://go.dev/dl/">Go</a>. For the full password experience (signing in with 1Password, passkeys in your Mac’s Secure Enclave, approving on your iPhone) you also need Xcode’s command line tools; all of that is optional.</p>
       <p class="lede lede--note"><strong>Coming soon:</strong> the Chrome extension in the Chrome Web Store and the iPhone app, Chrome Relay Approve, in the App Store. Both are in review. Until they’re out, load the extension from your download and build the iPhone app from the repo, as below.</p>
     </div>
 
@@ -416,15 +416,15 @@ Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
 
 Do the whole setup yourself, start to finish, without stopping to ask me. Install what&#x27;s missing, pick sensible defaults, fix what fails, and tell me what you chose at the end. Stop for me only at the steps marked ME, which only I can do, and do everything else while you wait.
 
-1. Check the basics: macOS, Google Chrome, git, Go 1.25+, agent-browser and Xcode&#x27;s command line tools (`xcode-select -p`). Install whatever is missing: `brew install go`, `npm i -g agent-browser`, `xcode-select --install` (the command line tools are what let agents sign in with 1Password and use passkeys, so install them).
+1. Check the basics: macOS, Google Chrome, git, Go 1.25+ and Xcode&#x27;s command line tools (`xcode-select -p`). Install whatever is missing: `brew install go`, `xcode-select --install` (the command line tools are what let agents sign in with 1Password and use passkeys, so install them).
 2. Clone the repo to ~/agent-chrome-relay (if it&#x27;s already there, `git pull` instead). In the clone, run `./build`: it compiles Chrome Relay and signs it on this Mac. If it lists several code-signing identities, pick one yourself (a Developer ID Application, else an Apple Development one) and run `./build --identity &quot;&lt;that name&gt;&quot;`. Then run `./chrome-relay setup`.
 3. ME: loading the extension (Chrome lets only me do it). Copy the clone&#x27;s `extension` folder path to my clipboard (`pbcopy`) and tell me, in one short list: in each Chrome profile agents should use, open chrome://extensions, turn on Developer mode, Load unpacked, press Cmd+Shift+G and paste the path, then pin Chrome Relay (puzzle-piece icon, then the pin). Meanwhile do steps 4 and 7, then check with `chrome-relay doctor` until it sees the extension.
 4. Run `chrome-relay notify test`. ME: allow the notification macOS shows (it&#x27;s only used when an agent is stuck on something only I can do).
 5. Run `chrome-relay doctor` and fix whatever it reports until every line is ok. Then run `chrome-relay identities`: the defaults (each profile&#x27;s own account) are fine; tell me what it found.
 6. Smoke test with the default profile:
-   agent-browser --cdp &quot;$(chrome-relay url &lt;email&gt;)&quot; open https://github.com
-   agent-browser get title
-   agent-browser close
+   chrome-relay open https://github.com --profile &lt;email&gt;
+   chrome-relay get title
+   chrome-relay close --all
 7. Make sure all my agents know how to use it. Claude Code already has it: setup linked the chrome-relay skill. For Codex, Cursor or other agents I have, add a one-line note to their global instructions (for example ~/.codex/AGENTS.md) that points to &lt;clone&gt;/skill/SKILL.md for any browser step that needs my logins.
 8. Signing in with 1Password: this is what lets agents sign in without me, so set it up if I have 1Password. `brew install 1password-cli`; if `op account list` fails, ME: turn on 1Password &gt; Settings &gt; Developer &gt; &quot;Integrate with 1Password CLI&quot;. Then, for each account `op account list` shows, run `chrome-relay vault setup &quot;Shared with Chrome Relay (&lt;short name&gt;)&quot; --account &lt;email&gt;` (1Password asks ME to approve; the token goes straight into the Keychain). Tell me to move or copy the logins agents may use into those vaults, and run `chrome-relay vault` to show me what agents can see.
 9. `chrome-relay do` carries out a whole goal in one command; it decides with Claude Haiku through my Claude Code. Run `chrome-relay decider` and tell me what it says.
@@ -432,7 +432,7 @@ Do the whole setup yourself, start to finish, without stopping to ask me. Instal
 When you&#x27;re done, tell me in a few lines what you set up and chose, and mention the extras I can turn on later: approving on my iPhone with Face ID (README, &quot;Approving from your iPhone&quot;) and the faster Jev decider (`pbpaste | chrome-relay decider jev` with a TypeSafe key; I paste the key myself).
 
 Rules while you do this:
-- Never print, log or paste the URL from `chrome-relay url`. It contains this Mac&#x27;s secret.
+- Never print, log or paste the URL from `chrome-relay url` (only agent-browser needs it). It contains this Mac&#x27;s secret.
 - Never ask me for a 1Password token, password or API key: those go straight from me into the Keychain.
 - Never drive my Chrome any other way: no --auto-connect, no --cdp 9222, no --headed, no Playwright attached to it and no AppleScript.</pre>
       <p class="step-note">The same prompt is at <a href="setup-prompt.txt">agent-chrome-relay.aindeev.com/setup-prompt.txt</a>. To set it up by hand instead:</p>
@@ -441,15 +441,6 @@ Rules while you do this:
     <ol class="steps">
       <li class="step reveal">
         <span class="step-n">01</span>
-        <h3>Install agent-browser</h3>
-        <button class="cmd cmd--block" type="button" data-copy="npm i -g agent-browser" aria-label="Copy: npm i -g agent-browser">
-          <span class="cmd-prompt" aria-hidden="true">$</span><span class="cmd-text">npm i -g agent-browser</span>
-          <span class="cmd-copy" aria-hidden="true"><svg viewBox="0 0 16 16" width="15" height="15"><rect x="5" y="5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M11 5V2H2v9h3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></span>
-          <span class="cmd-done" aria-hidden="true">copied</span>
-        </button>
-      </li>
-      <li class="step reveal">
-        <span class="step-n">02</span>
         <h3>Clone, build and run setup</h3>
         <button class="cmd cmd--block" type="button" data-copy="git clone https://github.com/aindeev/agent-chrome-relay&#10;cd agent-chrome-relay &amp;&amp; ./build &amp;&amp; ./chrome-relay setup" aria-label="Copy the clone, build and setup commands">
           <span class="cmd-prompt" aria-hidden="true">$</span><span class="cmd-text">git clone https://github.com/aindeev/agent-chrome-relay<br>cd agent-chrome-relay &amp;&amp; ./build &amp;&amp; ./chrome-relay setup</span>
@@ -459,7 +450,7 @@ Rules while you do this:
         <p class="step-note"><code>./build</code> compiles Chrome Relay and signs it on your Mac: with your code-signing identity if you have one, otherwise ad-hoc. Without Xcode’s command line tools it builds the core only, without 1Password and Secure Enclave passkeys, and says so. Setup creates your Mac’s secret, starts the background service, finds your Chrome profiles, adds <code>chrome-relay</code> to your PATH and installs the Claude Code skill. It is safe to run again.</p>
       </li>
       <li class="step reveal">
-        <span class="step-n">03</span>
+        <span class="step-n">02</span>
         <h3>Load the extension in each profile</h3>
         <p class="path" aria-label="chrome://extensions, then Developer mode, then Load unpacked, then the repo's extension folder">
           <code>chrome://extensions</code><span class="sep" aria-hidden="true"></span>Developer mode<span class="sep" aria-hidden="true"></span>Load unpacked<span class="sep" aria-hidden="true"></span><code>extension/</code>
@@ -467,7 +458,7 @@ Rules while you do this:
         <p class="step-note">Repeat this in every Chrome profile your agents should use, pin it so you see its badge, then run <code>chrome-relay doctor</code> to check. Once the Chrome Web Store version is through review, this step becomes one click.</p>
       </li>
       <li class="step reveal">
-        <span class="step-n">04</span>
+        <span class="step-n">03</span>
         <h3>Optional: let agents sign in with 1Password</h3>
         <button class="cmd cmd--block" type="button" data-copy="chrome-relay vault setup" aria-label="Copy: chrome-relay vault setup">
           <span class="cmd-prompt" aria-hidden="true">$</span><span class="cmd-text">chrome-relay vault setup</span>
@@ -477,7 +468,7 @@ Rules while you do this:
         <p class="step-note">It asks which 1Password accounts agents may use, then creates a shared vault and a service account that can open only that vault. Move in the logins agents may use. Needs the 1Password app and CLI, and the build with Xcode’s command line tools. 1Password is the only password manager supported for now.</p>
       </li>
       <li class="step reveal">
-        <span class="step-n">05</span>
+        <span class="step-n">04</span>
         <h3>Optional: approve from your iPhone</h3>
         <button class="cmd cmd--block" type="button" data-copy="./ios/build &amp;&amp; chrome-relay phone pair" aria-label="Copy: ./ios/build &amp;&amp; chrome-relay phone pair">
           <span class="cmd-prompt" aria-hidden="true">$</span><span class="cmd-text">./ios/build &amp;&amp; chrome-relay phone pair</span>
@@ -492,7 +483,9 @@ Rules while you do this:
       <p class="plate plate--sm">Commands</p>
       <ul class="cmd-list">
         <li><code><span class="p">$</span> chrome-relay setup</code><span>one-time setup, safe to run again</span></li>
-        <li><code><span class="p">$</span> chrome-relay url [email]</code><span>the connection URL agent-browser uses for a profile</span></li>
+        <li><code><span class="p">$</span> chrome-relay open &lt;url&gt;</code><span>open a page in a background tab of the agent’s own</span></li>
+        <li><code><span class="p">$</span> chrome-relay snapshot</code><span>the page’s controls, each with a ref like @e5; then click, fill, get text, screenshot, close</span></li>
+        <li><code><span class="p">$</span> chrome-relay url [email]</code><span>the connection URL, if an agent uses agent-browser instead</span></li>
         <li><code><span class="p">$</span> chrome-relay do "&lt;goal&gt;"</code><span>carry out a whole goal in the agent’s tab</span></li>
         <li><code><span class="p">$</span> chrome-relay decider</code><span>what <code>do</code> decides with: Jev, or Haiku through Claude Code</span></li>
         <li><code><span class="p">$</span> chrome-relay flows</code><span>the flows <code>do</code> saved, replayed without a model</span></li>

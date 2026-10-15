@@ -4,15 +4,15 @@ Repo: https://github.com/aindeev/agent-chrome-relay (read its README first).
 
 Do the whole setup yourself, start to finish, without stopping to ask me. Install what's missing, pick sensible defaults, fix what fails, and tell me what you chose at the end. Stop for me only at the steps marked ME, which only I can do, and do everything else while you wait.
 
-1. Check the basics: macOS, Google Chrome, git, Go 1.25+, agent-browser and Xcode's command line tools (`xcode-select -p`). Install whatever is missing: `brew install go`, `npm i -g agent-browser`, `xcode-select --install` (the command line tools are what let agents sign in with 1Password and use passkeys, so install them).
+1. Check the basics: macOS, Google Chrome, git, Go 1.25+ and Xcode's command line tools (`xcode-select -p`). Install whatever is missing: `brew install go`, `xcode-select --install` (the command line tools are what let agents sign in with 1Password and use passkeys, so install them).
 2. Clone the repo to ~/agent-chrome-relay (if it's already there, `git pull` instead). In the clone, run `./build`: it compiles Chrome Relay and signs it on this Mac. If it lists several code-signing identities, pick one yourself (a Developer ID Application, else an Apple Development one) and run `./build --identity "<that name>"`. Then run `./chrome-relay setup`.
 3. ME: loading the extension (Chrome lets only me do it). Copy the clone's `extension` folder path to my clipboard (`pbcopy`) and tell me, in one short list: in each Chrome profile agents should use, open chrome://extensions, turn on Developer mode, Load unpacked, press Cmd+Shift+G and paste the path, then pin Chrome Relay (puzzle-piece icon, then the pin). Meanwhile do steps 4 and 7, then check with `chrome-relay doctor` until it sees the extension.
 4. Run `chrome-relay notify test`. ME: allow the notification macOS shows (it's only used when an agent is stuck on something only I can do).
 5. Run `chrome-relay doctor` and fix whatever it reports until every line is ok. Then run `chrome-relay identities`: the defaults (each profile's own account) are fine; tell me what it found.
 6. Smoke test with the default profile:
-   agent-browser --cdp "$(chrome-relay url <email>)" open https://github.com
-   agent-browser get title
-   agent-browser close
+   chrome-relay open https://github.com --profile <email>
+   chrome-relay get title
+   chrome-relay close --all
 7. Make sure all my agents know how to use it. Claude Code already has it: setup linked the chrome-relay skill. For Codex, Cursor or other agents I have, add a one-line note to their global instructions (for example ~/.codex/AGENTS.md) that points to <clone>/skill/SKILL.md for any browser step that needs my logins.
 8. Signing in with 1Password: this is what lets agents sign in without me, so set it up if I have 1Password. `brew install 1password-cli`; if `op account list` fails, ME: turn on 1Password > Settings > Developer > "Integrate with 1Password CLI". Then, for each account `op account list` shows, run `chrome-relay vault setup "Shared with Chrome Relay (<short name>)" --account <email>` (1Password asks ME to approve; the token goes straight into the Keychain). Tell me to move or copy the logins agents may use into those vaults, and run `chrome-relay vault` to show me what agents can see.
 9. `chrome-relay do` carries out a whole goal in one command; it decides with Claude Haiku through my Claude Code. Run `chrome-relay decider` and tell me what it says.
@@ -20,6 +20,6 @@ Do the whole setup yourself, start to finish, without stopping to ask me. Instal
 When you're done, tell me in a few lines what you set up and chose, and mention the extras I can turn on later: approving on my iPhone with Face ID (README, "Approving from your iPhone") and the faster Jev decider (`pbpaste | chrome-relay decider jev` with a TypeSafe key; I paste the key myself).
 
 Rules while you do this:
-- Never print, log or paste the URL from `chrome-relay url`. It contains this Mac's secret.
+- Never print, log or paste the URL from `chrome-relay url` (only agent-browser needs it). It contains this Mac's secret.
 - Never ask me for a 1Password token, password or API key: those go straight from me into the Keychain.
 - Never drive my Chrome any other way: no --auto-connect, no --cdp 9222, no --headed, no Playwright attached to it and no AppleScript.

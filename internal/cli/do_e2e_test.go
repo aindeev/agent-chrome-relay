@@ -89,6 +89,8 @@ window.__crDrive = { nodes: new Map(), ids: new WeakMap(), next: 1, rect: () => 
 <label><input type="checkbox" id="k"> Remember me</label><p id="out"></p><ol><li class="item">First item</li></ol>
 <input type="search" aria-label="Search"><button>Search</button><search>not this</search>
 <a href="/invoice">Next page</a>`,
+	"/login": `<title>Sign in</title><h1>Sign in</h1><form onsubmit="return false"><label>Username <input id="u" autocomplete="username"></label>
+<label>Password <input type="password" id="p" autocomplete="current-password"></label><button>Sign in</button></form>`,
 	"/covered": `<title>Welcome</title><h1>Welcome</h1><button onclick="document.body.append('Continued')">Continue</button>
 <div style="position:fixed;inset:0;background:rgba(0,0,0,.4)"><div style="background:#fff;margin:30vh auto;width:300px">Cookies? <button>Accept</button></div></div>`,
 }
@@ -306,6 +308,7 @@ type e2e struct {
 	agent  *websocket.Conn
 	tab    string
 	site   *httptest.Server
+	vault  *e2eVault
 	mu     sync.Mutex
 	nextID int
 }
@@ -318,10 +321,12 @@ func newE2E(t *testing.T, own ...bool) *e2e {
 	}
 	home := t.TempDir()
 	os.WriteFile(filepath.Join(home, "token"), []byte("test-secret"), 0o600)
-	os.WriteFile(filepath.Join(home, "config.json"), []byte(`{"extensionIds":["`+e2eExtID+`"]}`), 0o600)
+	os.WriteFile(filepath.Join(home, "config.json"), []byte(`{"extensionIds":["`+e2eExtID+`"],"onepassword":{"vault":"Agents"}}`), 0o600)
 	os.WriteFile(filepath.Join(home, "identities.json"), []byte(`{"profiles":{},"sites":{"rules":{},"learned":{}}}`), 0o600)
 	who := relay.Caller{PID: 4242, App: "claude", Cwd: "/work", ClaudeSession: "e2e"}
-	s, err := relay.New(relay.Options{Home: home, Port: 1, Caller: func(int) relay.Caller { return who }, IsChrome: func(int) bool { return true }})
+	pw := &e2eVault{}
+	s, err := relay.New(relay.Options{Home: home, Port: 1, Caller: func(int) relay.Caller { return who }, IsChrome: func(int) bool { return true },
+		VaultStore: pw, VaultPerson: pw})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,15 +336,17 @@ func newE2E(t *testing.T, own ...bool) *e2e {
 	chrome := startChrome(t)
 	fakeExtension(t, chrome, srv.URL, "me@example.com")
 	time.Sleep(300 * time.Millisecond)
+	st := site(t)
+	pw.site = st.URL
 	if len(own) > 0 && own[0] {
-		return &e2e{t: t, home: home, port: port, site: site(t)}
+		return &e2e{t: t, home: home, port: port, site: st, vault: pw}
 	}
 	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/devtools/browser/agent?token=test-secret&profile=me%40example.com", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ws.Close() })
-	e := &e2e{t: t, home: home, port: port, agent: ws, site: site(t)}
+	e := &e2e{t: t, home: home, port: port, agent: ws, site: st, vault: pw}
 	r := e.cmd("Target.createTarget", map[string]any{"url": "about:blank"}, "")
 	e.tab = fmt.Sprint(r["targetId"])
 	return e
@@ -759,5 +766,66 @@ func TestDriveCommands(t *testing.T) {
 	}
 	if strings.Contains(string(b), "Ada Lovelace") || strings.Contains(string(b), "SAVE10") {
 		t.Error("the audit holds typed text")
+	}
+}
+
+// Signing in with 1Password through the step commands: the relay types the values, the agent never sees them.
+func TestDriveVaultFill(t *testing.T) {
+	e := newE2E(t, true)
+	run := func(args ...string) (string, int) {
+		out, code := e.run(args...)
+		t.Log(strings.Join(args, " "), "\n", out)
+		return out, code
+	}
+	want := func(out string, code int, wantCode int, subs ...string) {
+		t.Helper()
+		if code != wantCode {
+			t.Errorf("exit %d, want %d: %s", code, wantCode, out)
+		}
+		for _, s := range subs {
+			if !strings.Contains(out, s) {
+				t.Errorf("missing %q in: %s", s, out)
+			}
+		}
+	}
+	out, code := run("open", e.site.URL+"/login")
+	want(out, code, 0, "✓ Sign in")
+	snap, _ := run("snapshot")
+	ref := regexp.MustCompile(`textbox "Username" \[(@e\d+)\]`).FindStringSubmatch(snap)
+	if ref == nil {
+		t.Fatal("no ref for Username")
+	}
+	out, code = run("fill", ref[1], "op://Agents/Local site/username") // by ref
+	want(out, code, 0, `✓ fill textbox "Username"`)
+	out, code = run("fill", "Password", "op://Agents/Local site/password") // by label
+	want(out, code, 0, `✓ fill password "Password"`)
+	out, code = run("get", "value", "Username") // every value the relay typed from the vault reads back masked
+	want(out, code, 0, "••••••••")
+	out, code = run("snapshot")
+	want(out, code, 0, `- password "Password" [@e`, "(filled)")
+	// what the page holds never comes back: not by script, not in its markup
+	out, code = run("eval", "document.getElementById('p').value")
+	want(out, code, 0, "••••••••")
+	out, code = run("get", "html", "form")
+	if code != 0 || strings.Contains(out, "hunter2") {
+		t.Errorf("html: %d %s", code, out)
+	}
+	for _, o := range []string{snap, out} {
+		if strings.Contains(o, "hunter2") {
+			t.Error("the secret came back:", o)
+		}
+	}
+	// a secret goes only into a password field
+	out, code = run("fill", "Username", "op://Agents/Local site/password")
+	want(out, code, 1, "1Password")
+	e.vault.mu.Lock()
+	n := len(e.vault.approvals)
+	e.vault.mu.Unlock()
+	if n != 1 {
+		t.Errorf("approvals: %d, want 1 (one covers the item's fields for 2 minutes)", n)
+	}
+	b, _ := os.ReadFile(filepath.Join(e.home, "audit", time.Now().UTC().Format("2006-01-02")+".jsonl"))
+	if strings.Contains(string(b), "hunter2") {
+		t.Error("the secret is in the audit trail")
 	}
 }

@@ -13,15 +13,14 @@
 **Website:** https://agent-chrome-relay.aindeev.com
 
 
-Lets your coding agents (Claude Code, Codex, Cursor, Paseo) use **your everyday Chrome**, with your real
+Lets your coding agents (Claude Code, Codex, Cursor, Paseo, pi) use **your everyday Chrome**, with your real
 logins, from the command line, **in background tabs**: nothing takes focus, no dialogs.
 
 Agents hand over **a whole goal in one command**, and Chrome Relay carries it out, checking every step:
 
 ```bash
-agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com/team/invite
-chrome-relay do "Invite the new teammate as an admin" \
-  --data "Email=ada@example.com" --data "Role=Admin" --until "text:Invitation sent"
+chrome-relay do "Invite the new teammate as an admin" --url https://app.example.com/team/invite \
+  --profile you@company.com --data "Email=ada@example.com" --data "Role=Admin" --until "text:Invitation sent"
 ```
 
 It fills what the agent names, replays what worked on that site before, asks a fast decision model (TypeSafe's
@@ -30,13 +29,18 @@ In a real Chrome with Jev: a 7-step form in **2.5 s**, **1.2 s** replayed, where
 takes about 3 s per action. See [`chrome-relay do`](#whole-goals-in-one-command-chrome-relay-do) and
 [the approach](https://agent-chrome-relay.aindeev.com/approach.html).
 
-Step by step works too, at ~0.15 s per command:
+Step by step works too, with Chrome Relay's own commands, in tens of milliseconds each:
 
 ```bash
-agent-browser snapshot -i          # the page's buttons, links and fields, each with a ref like @e5
-agent-browser click @e5
-agent-browser close
+chrome-relay open https://app.example.com/team/invite --profile you@company.com
+chrome-relay snapshot              # the page's buttons, links and fields, each with a ref like @e5
+chrome-relay fill @e3 "ada@example.com"; chrome-relay click "Send invitation"
+chrome-relay close --all
 ```
+
+Each action first checks the control is still there, enabled, on screen and not covered, and says what changed.
+[agent-browser](https://github.com/vercel-labs/agent-browser) works through the relay as well, if you prefer it;
+it's no longer required. How the two compare: [Step by step](#step-by-step-chrome-relays-own-commands).
 
 It's opt-in: nothing installs the extension for you, and it only runs on Macs whose owner set it up.
 
@@ -53,11 +57,11 @@ passkeys), Secure Enclave passkeys, approving from your iPhone, and a TypeSafe k
 ## How it works
 
 ```
-agent-browser (CLI) ──ws──────────────┐
-                                      ├──▶ relay (127.0.0.1:9333, LaunchAgent) ──ws──▶ Chrome Relay extension ──chrome.debugger──▶ agent tab
-chrome-relay do ──http /driver────────┘         ▲
-   │                                            └── reads the page and acts, in that agent's own tabs only
-   └── decides: saved flows → the agent's data → Jev or Haiku (Claude Code) → hand back to the agent
+chrome-relay open/click/fill/... ──unix socket /driver──┐
+chrome-relay do ──────────────────unix socket /driver───┼──▶ relay (127.0.0.1:9333, LaunchAgent) ──ws──▶ Chrome Relay extension ──chrome.debugger──▶ agent tab
+agent-browser (optional) ─────────ws (DevTools)─────────┘         ▲
+   │                                                               └── reads the page and acts, in that agent's own tabs only
+   └── do decides: saved flows → the agent's data → Jev or Haiku (Claude Code) → hand back to the agent
 ```
 
 - **Extension** (`extension/`, MV3, one per Chrome profile you load it in): opens each agent tab **inactive**
@@ -77,8 +81,7 @@ Fastest: paste [this prompt](https://agent-chrome-relay.aindeev.com/setup-prompt
 Cursor in its auto mode (Claude Code: Shift+Tab, or `claude --permission-mode auto`; Codex:
 `--full-auto`) and let your agent do it. You only load the extension and approve in 1Password. By hand:
 
-Needs macOS, Google Chrome, [Go](https://go.dev/dl/) 1.25+ (`brew install go`) and
-[`agent-browser`](https://github.com/vercel-labs/agent-browser) (`npm i -g agent-browser`).
+Needs macOS, Google Chrome and [Go](https://go.dev/dl/) 1.25+ (`brew install go`).
 
 ```bash
 git clone https://github.com/aindeev/agent-chrome-relay
@@ -122,24 +125,23 @@ one-line pointer to the skill.
 
 ## Whole goals in one command: `chrome-relay do`
 
-Driving a page one `agent-browser` command at a time costs the agent a model round trip per click: the relay
+Driving a page one command at a time costs the agent a model round trip per click: the relay
 answers in ~15 ms, the agent thinks for seconds. `chrome-relay do` lets the agent state the goal once, with the
 values it already knows and how to tell it's done, and Chrome Relay carries it out in the agent's own tab:
 
 ```bash
-agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com/team/invite
-chrome-relay do "Invite the new teammate as an admin" \
-  --data "Email=ada@example.com" --data "Role=Admin" --until "text:Invitation sent"
+chrome-relay do "Invite the new teammate as an admin" --url https://app.example.com/team/invite \
+  --profile you@company.com --data "Email=ada@example.com" --data "Role=Admin" --until "text:Invitation sent"
 ```
 
-Each step is the cheapest thing that works:
+Without `--url` it works in the tab the agent used last. Each step is the cheapest thing that works:
 
 1. **A flow that worked before.** A run that ends with its `--until` checks met is saved per site
    (`~/.chrome-relay/flows/`, steps and data keys, never values); the same kind of goal there replays at browser
    speed, with the new data. `chrome-relay flows` lists them.
 2. **The agent's data.** A `--data` key that names a field (`Email` → "E-mail address") fills it, picks the
    dropdown option or ticks the box, no model involved. Values can be `op://` references: the relay types them
-   from 1Password as it does for agent-browser.
+   from 1Password as it does for a `fill`.
 3. **A fast decision model** for the rest: TypeSafe's Jev (~0.15 s a step) if you saved a key
    (`pbpaste | chrome-relay decider jev`), else Claude Haiku through your own Claude Code (~1–1.5 s a step, on your
    Claude plan). It picks from a shortlist of the page's controls and from the agent's data only: it never invents
@@ -181,6 +183,56 @@ enough yet. The method, caveats and the full table: [the approach](https://agent
 
 Which decider runs: `chrome-relay decider` (and `doctor`). Every step is in the audit trail as `do click`,
 `do fill` (the field, never the text), with `do start`/`do end` around the run.
+
+
+## Step by step: Chrome Relay's own commands
+
+For the steps `do` hands back, or when an agent wants to look as it goes, `chrome-relay` drives the page one
+command at a time. Each agent has its own session (`CHROME_RELAY_SESSION=<name>`; Claude Code, Codex and Paseo
+sessions are told apart on their own), and only sees the tabs it opened.
+
+```bash
+chrome-relay open <url> [--profile <email>] [--new]   # the first open starts the session; --new: another tab
+chrome-relay snapshot [--text] [--json]               # controls with refs (@e5), and with --text the page's text
+chrome-relay click | dblclick | hover <target>        # <target>: @e5, a whole label ("Save", button:Save), or CSS
+chrome-relay fill <target> <text>                     # replace a field's text; op:// references from 1Password
+chrome-relay type | select | check | uncheck | upload | drag | press | scroll | back | reload
+chrome-relay get text|value|html|attr|count|url|title  # and: is visible|enabled|checked, eval, wait, screenshot, pdf
+chrome-relay console | errors | cookies | dialog accept|dismiss | tabs | tab <id> | cdp <Domain.method>
+chrome-relay close [--all]
+```
+
+- **Every action is checked.** Before it: the control is still the one the agent saw, enabled, on screen and not
+  covered (or about to hit another control inside it). After it: what changed, at once; the wait for the page to
+  finish comes before the next step, usually while the agent is thinking.
+- **It never guesses.** A label that matches two controls is refused with their refs; clicking needs the whole
+  label ("Cancel" never clicks "Cancel subscription"); a ref from a page that's gone never names something on the
+  next one.
+- **The page can't steer it.** Its page scripts run in a script world of their own, so a site's JavaScript can't
+  move where a click lands.
+- **What it reads.** Snapshots see into open shadow roots and same-site frames, and list clickable elements
+  without a role (a `<div>` with a click handler), file fields behind styled buttons, and radios hidden behind
+  their labels. Frames from other sites are named but not read.
+
+Compared with [agent-browser](https://github.com/vercel-labs/agent-browser) through the same relay, on 23 test
+pages that report whether the action really happened (`CHROME_RELAY_E2E=1 CHROME_RELAY_COMPARE=1 go test
+./internal/cli -run TestCompareWithAgentBrowser`): Chrome Relay's commands 22, agent-browser 20. agent-browser
+missed a `<div>` used as a button and a link that is only an image, and said "Done" on another site's frame
+where nothing happened; both fail on that frame. Speed in a real Chrome (background tabs, median of five,
+a local page, four runs):
+
+| Command | agent-browser | chrome-relay |
+|---|---|---|
+| open a page | 42–54 ms | 49–69 ms |
+| snapshot | 16–22 ms | 15–20 ms |
+| fill | 14–23 ms | 21–26 ms |
+| click | 19–25 ms | 27–29 ms |
+| read the page's text | 12–17 ms | 13–18 ms |
+
+The few milliseconds on fill and click are the check before the action and the read of what changed. What
+agent-browser has that these commands don't: recording network traffic, traces and video, page diffs and
+downloads. To use it instead: `agent-browser --cdp "$(chrome-relay url you@company.com)" open <url>` (the URL
+carries this Mac's secret: keep it out of logs and chats), then `agent-browser ...` as usual.
 
 ## Who can drive it
 
@@ -268,9 +320,9 @@ Agents fill a field with a [secret reference](https://developer.1password.com/do
 and the relay types the real value:
 
 ```bash
-agent-browser fill @e2 "op://Shared with Chrome Relay/Twilio/username"
-agent-browser fill @e3 "op://Shared with Chrome Relay/Twilio/password"
-agent-browser fill @e7 "op://Shared with Chrome Relay/Twilio/otp"   # the current one-time code, from the item's TOTP secret
+chrome-relay fill @e2 "op://Shared with Chrome Relay/Twilio/username"
+chrome-relay fill @e3 "op://Shared with Chrome Relay/Twilio/password"
+chrome-relay fill @e7 "op://Shared with Chrome Relay/Twilio/otp"   # the current one-time code, from the item's TOTP secret
 ```
 
 - **Which account.** You may have several logins for one site (three Twilio items, say). The relay never picks:
@@ -370,7 +422,7 @@ it. So keep in the vault only accounts you're happy for agents to use, and give 
 ## Audit trail
 
 Every agent action is recorded in `~/.chrome-relay/audit/YYYY-MM-DD.jsonl`; read it with `chrome-relay audit`:
-who connected (app, Claude/Paseo session id, working folder, `AGENT_BROWSER_SESSION`), pages, clicks with
+who connected (app, Claude/Paseo session id, working folder, `CHROME_RELAY_SESSION` or `AGENT_BROWSER_SESSION`), pages, clicks with
 positions, special keys, the agent's own scripts, screenshots, uploads, popups, sign-in clicks and blocked
 pages. Typed text is stored only as a character count, and URLs lose their query string.
 

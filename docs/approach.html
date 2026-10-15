@@ -56,9 +56,8 @@ same spot within 15 seconds, because the first one didn't take and the agent had
 that check themselves so the agent doesn't have to.</p>
 
 <h2>The approach: say the goal once</h2>
-<pre>agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com/team/invite
-chrome-relay do "Invite the new teammate as an admin" \
-  --data "Email=ada@example.com" --data "Role=Admin" --until "text:Invitation sent"</pre>
+<pre>chrome-relay do "Invite the new teammate as an admin" --url https://app.example.com/team/invite \
+  --profile you@company.com --data "Email=ada@example.com" --data "Role=Admin" --until "text:Invitation sent"</pre>
 <p>The agent states the goal, gives the values it already knows, and says how to tell it's done. Chrome Relay then
 carries it out in the agent's tab. For each step, it uses the cheapest thing that works:</p>
 <ol>
@@ -155,14 +154,37 @@ clicks they had to repeat.</p>
     run stays on the site it started on.</li>
 </ul>
 
+<h2>Step by step, without agent-browser</h2>
+<p>For the steps <code>do</code> hands back, Chrome Relay now has its own commands (<code>chrome-relay open</code>,
+<code>snapshot</code>, <code>click</code>, <code>fill</code>, <code>get text</code>, <code>screenshot</code>,
+<code>close</code> and the rest), built on the same page scripts as <code>do</code>: every action checks its control
+first and says what changed. We only made them the default once they were as good as agent-browser, measured
+head to head through the same relay:</p>
+<table>
+  <tr><th>What</th><th class="n">agent-browser</th><th class="n">chrome-relay</th></tr>
+  <tr><td>Test pages where the action really happened (23)</td><td class="n">20</td><td class="n">22</td></tr>
+  <tr><td>open a page (real Chrome, background tab, local page)</td><td class="n">42–54 ms</td><td class="n">49–69 ms</td></tr>
+  <tr><td>snapshot</td><td class="n">16–22 ms</td><td class="n">15–20 ms</td></tr>
+  <tr><td>fill</td><td class="n">14–23 ms</td><td class="n">21–26 ms</td></tr>
+  <tr><td>click</td><td class="n">19–25 ms</td><td class="n">27–29 ms</td></tr>
+  <tr><td>read the page's text</td><td class="n">12–17 ms</td><td class="n">13–18 ms</td></tr>
+</table>
+<p>agent-browser missed a <code>&lt;div&gt;</code> used as a button and a link that is only an image, and said "Done"
+on another site's frame where nothing happened. Getting the speed took four things: naming the caller from the
+kernel over a Unix socket instead of <code>lsof</code> (0.3 ms instead of ~170 ms, for every command); filling a
+field through focus and a selection, as Playwright does; reporting an action at once and waiting for the page
+before the next step instead, usually while the agent thinks; and polling a loading page every 10 ms. agent-browser
+still works through the relay for what it has and these don't: network recording, traces and video, page diffs
+and downloads.</p>
+
 <h2>Thanks</h2>
 <p><a href="https://github.com/browser-use/jev-ultrafast">browser-use/jev-ultrafast</a> (MIT), whose page snapshot
 and rules <code>chrome-relay do</code> adapts; <a href="https://typesafe.ai">TypeSafe</a> for Jev;
 <a href="https://huggingface.co/Cloudflare/clef">Cloudflare's Clef</a>,
 <a href="https://huggingface.co/LiquidAI/d1-3B">LiquidAI's d1</a>, Kev and Laya, all open models we tried;
 <a href="https://huggingface.co/datasets/osunlp/Multimodal-Mind2Web">Mind2Web</a> for the benchmark; and
-<a href="https://github.com/vercel-labs/agent-browser">agent-browser</a>, which agents still use for everything
-else.</p>
+<a href="https://github.com/vercel-labs/agent-browser">agent-browser</a>, which agents used before Chrome Relay
+had its own commands, and still can.</p>
 <p>Code and docs: <a href="https://github.com/aindeev/agent-chrome-relay">github.com/aindeev/agent-chrome-relay</a>.</p>
 </body>
 </html>

@@ -164,7 +164,13 @@ func TestDriverActsLikeTheAgent(t *testing.T) {
 // as the kernel names it (here, this test).
 func TestDriverSocket(t *testing.T) {
 	h := newHarness(t)
-	sock := filepath.Join(t.TempDir(), "relay.sock")
+	// a short path: a Unix socket's may not exceed 104 bytes, and test folders can be deep
+	short, err := os.MkdirTemp("", "crs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(short) })
+	sock := filepath.Join(short, "relay.sock")
 	if err := h.s.serveSocket(sock); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +195,7 @@ func TestDriverSocket(t *testing.T) {
 		t.Error("no secret:", code)
 	}
 	// with the secret: who is calling comes from the kernel, not from what the request says
-	ul, err := net.Listen("unix", filepath.Join(t.TempDir(), "peer.sock"))
+	ul, err := net.Listen("unix", filepath.Join(short, "peer.sock"))
 	if err != nil {
 		t.Fatal(err)
 	}

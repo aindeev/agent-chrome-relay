@@ -20,7 +20,7 @@ func vaultRef(text string) bool { return vault.Ref.MatchString(text) }
 
 func (a *Agent) who() vault.Who { return vault.Who{Name: describe(a.app, a.cwd), Session: a.sid} }
 
-// fillSecret: `agent-browser fill @e3 "op://Agents/GitHub/password"` types the real value from the shared vault.
+// fillSecret: `chrome-relay fill @e3 "op://Agents/GitHub/password"` types the real value from the shared vault.
 // The agent never gets it back: the vault (and the person's Touch ID) decides, the page's site must be the
 // item's, secrets go only into password fields of the page itself, and anything the page echoes is masked.
 func (a *Agent) fillSecret(t int, child string, m message, ref string) {
@@ -50,7 +50,7 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 	case el != nil && el.Frame:
 		refuse(errors.New("the focused field is inside a frame; secrets are only typed into the page itself"))
 	case el == nil:
-		refuse(errors.New("no text field has focus: use `agent-browser fill @ref <reference>` on the field"))
+		refuse(errors.New("no text field has focus: use `chrome-relay fill @eN <reference>` (or agent-browser's fill) on the field"))
 	case a.urls[t] != u:
 		refuse(errors.New("the page changed while 1Password answered; fill the field again"))
 	case v.Kind == "secret" && el.Type != "password":
@@ -137,7 +137,7 @@ func (a *Agent) saveSecret(t int, child string, m message, ref string, r vault.S
 		refuse(errors.New("secrets are only typed into the page itself, not into a frame inside it"))
 		return
 	case el == nil:
-		refuse(errors.New("no text field has focus: use `agent-browser fill @ref <reference>` on the field"))
+		refuse(errors.New("no text field has focus: use `chrome-relay fill @eN <reference>` (or agent-browser's fill) on the field"))
 		return
 	case r.Field == "password" && el.Type != "password":
 		refuse(errors.New("a new password only goes into a password field"))
@@ -339,7 +339,7 @@ func (a *Agent) onWebAuthn(t, id int, c map[string]any, from callFrom) {
 			for _, k := range cands {
 				names = append(names, fmt.Sprintf("%q (%s)", k.Item, k.UserName))
 			}
-			refuse("NotAllowedError", fmt.Sprintf("the vault has %d passkeys for %s: %s. Fill the username first (agent-browser fill @ref \"op://<vault>/<item>/username\") so Chrome Relay knows which account", len(cands), rpID, strings.Join(names, ", ")))
+			refuse("NotAllowedError", fmt.Sprintf("the vault has %d passkeys for %s: %s. Fill the username first (chrome-relay fill @eN \"op://<vault>/<item>/username\") so Chrome Relay knows which account", len(cands), rpID, strings.Join(names, ", ")))
 			return
 		}
 		var key *passkeys.Passkey

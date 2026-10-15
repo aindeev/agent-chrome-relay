@@ -303,7 +303,7 @@ func formatVaultList(d vaultSummary, sources []source) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, `1Password vaults agents may use: %s. Agents fill a field with a reference, never the value:
-  agent-browser fill @eN "op://<vault>/<item>/username"     (also: password, otp, or any field's name)
+  chrome-relay fill @eN "op://<vault>/<item>/username"      (also: password, otp, or any field's name)
 
 `, quoteList(vaults))
 	for _, v := range vaults {
