@@ -26,7 +26,9 @@ const usage = `Chrome Relay: your coding agents drive background tabs in your ev
                                    identities, skill; safe to re-run
   chrome-relay setup --dev         from a second checkout (a git worktree): install it beside your normal one as
                                    ` + "`chrome-relay-dev-mode`" + `, with its own relay (port 9334), data and extension
-  chrome-relay url [email]         CDP URL for agent-browser, including this Mac's secret
+  chrome-relay open <url> [--profile <email>]  open a page in a background tab of yours (starts your session)
+  chrome-relay snapshot | click | fill | get | ... | close  drive it step by step (` + "`chrome-relay open --help`" + ` lists them)
+  chrome-relay url [email]         a DevTools URL for agent-browser instead, including this Mac's secret
                                    agent-browser --cdp "$(chrome-relay url you@company.com)" open <url>
   chrome-relay identities          Chrome profiles, their Google accounts, and which account each site uses
   chrome-relay vault               the 1Password vaults agents sign in with: items, websites, what each holds (never values)
@@ -49,7 +51,7 @@ const usage = `Chrome Relay: your coding agents drive background tabs in your ev
   chrome-relay flows [forget <site>]  the flows ` + "`do`" + ` saved, replayed without a model
   chrome-relay status              connected profiles and agents
   chrome-relay doctor              check everything and say how to fix what's wrong
-  chrome-relay update [--force]    after ` + "`git pull` and `./build`" + `: restart the relay and reload the extension everywhere (waits for idle agents unless --force)
+  chrome-relay update [--force]    after ` + "`git pull` and `./build`" + `: restart the relay and reload the extension everywhere (refused while agents are connected, unless --force)
   chrome-relay audit [N] [filter]  last N audit events (default 40), optionally only lines containing filter
   chrome-relay logs [N]            last N relay log lines
   chrome-relay uninstall           stop and remove the background service, CLI link and skill (keeps ~/.chrome-relay)

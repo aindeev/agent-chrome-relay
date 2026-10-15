@@ -198,6 +198,11 @@ func New(o Options) (*Server, error) {
 		}
 		return strings.Join(st, ",")
 	}
+	if o.VaultStore != nil {
+		store := o.VaultStore
+		s.vault = &vault.Vault{Settings: s.vaultSettings, Person: o.VaultPerson, CLI: cli,
+			Connect: func(context.Context, string) (vault.Store, error) { return store, nil }}
+	}
 	if macos.Linked { // the core-only build has no Secure Enclave passkeys; 1Password's still work, through the handoff
 		s.chip = chip{instance: o.Instance}
 	}

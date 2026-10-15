@@ -55,9 +55,9 @@
 
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const P = '<span class="p">$</span> ';
-  const CMD1 = 'agent-browser --cdp "$(chrome-relay url you@company.com)" open https://app.example.com';
+  const CMD1 = 'chrome-relay open https://app.example.com --profile you@company.com';
   const CMD2 = 'chrome-relay do "Start a new report" --until "text:New report"';
-  const CMD4 = 'agent-browser close';
+  const CMD4 = 'chrome-relay close --all';
 
   let visible = false;
   let wake = null;
@@ -132,7 +132,7 @@
       await type(CMD4);
       ghostState();
       setCount(0);
-      await print('<span class="ok">✓</span> Browser closed', 200);
+      await print('<span class="ok">✓</span> closed 1 tab(s), 0 left', 200);
       render(P + '<span class="cur"></span>');
       await step(3200);
     }
