@@ -173,6 +173,8 @@ h1, h2, h3 { font-family: var(--f-display); font-weight: 500; margin: 0; letter-
 
 .badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0; }
 .badge { display: inline-flex; padding: 3px 9px; font-size: 13px; font-weight: 500; letter-spacing: .02em; border: 1px solid var(--rule-soft); color: var(--ink-2); background: rgba(255,255,255,.85); }
+a.badge { text-decoration: none; }
+a.badge:hover { color: var(--ink); border-color: var(--ink); }
 .badge-ink { background: var(--ink); color: #fff; border-color: var(--ink); }
 .btn-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 10px; }
 

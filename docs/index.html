@@ -97,8 +97,8 @@
         </div>
         <p class="badges">
           <span class="badge badge-ink">MIT · open source</span>
-          <span class="badge">macOS · Chrome · built from source today</span>
-          <span class="badge">Chrome Web Store extension and iPhone app: in review, coming soon</span>
+          <span class="badge">macOS · Chrome</span>
+          <a class="badge" href="https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom">Extension in the Chrome Web Store</a>
         </p>
         <div class="btn-row">
           <a class="btn btn-ink btn-lg" href="https://github.com/aindeev/agent-chrome-relay">Get it on GitHub</a>
@@ -301,7 +301,7 @@
         </div>
         <div>
           <h3>The extension</h3>
-          <p>You load it in each Chrome profile your agents may use: from your download today, from the Chrome Web Store once it’s through review. It opens agent tabs inactive in the collapsed “Agents” group and runs commands in them through Chrome’s <code>chrome.debugger</code> API, without opening a remote-debugging port.</p>
+          <p>You add it to each Chrome profile your agents may use, from the <a href="https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom">Chrome Web Store</a>. It opens agent tabs inactive in the collapsed “Agents” group and runs commands in them through Chrome’s <code>chrome.debugger</code> API, without opening a remote-debugging port.</p>
         </div>
         <div>
           <h3>The CLI</h3>
@@ -395,8 +395,8 @@
     <div class="section-head reveal">
       <p class="plate">Install</p>
       <h2 id="install-title">Set it up <span class="hl">once per Mac</span></h2>
-      <p class="lede">Today you build Chrome Relay from source, which takes about two minutes. You need macOS, Google Chrome and <a href="https://go.dev/dl/">Go</a>. For the full password experience (signing in with 1Password, passkeys in your Mac’s Secure Enclave, approving on your iPhone) you also need Xcode’s command line tools; all of that is optional.</p>
-      <p class="lede lede--note"><strong>Coming soon:</strong> the Chrome extension in the Chrome Web Store and the iPhone app, Chrome Relay Approve, in the App Store. Both are in review. Until they’re out, load the extension from your download and build the iPhone app from the repo, as below.</p>
+      <p class="lede">You build the Mac service from source, which takes about two minutes, and add the extension from the Chrome Web Store. You need macOS, Google Chrome and <a href="https://go.dev/dl/">Go</a>. For the full password experience (signing in with 1Password, passkeys in your Mac’s Secure Enclave, approving on your iPhone) you also need Xcode’s command line tools; all of that is optional.</p>
+      <p class="lede lede--note"><strong>Coming soon:</strong> the iPhone app, Chrome Relay Approve, in the App Store. It’s in review; until it’s out, build it from the repo, as below.</p>
     </div>
 
     <div class="agent-setup reveal" id="agent-setup">
@@ -418,7 +418,7 @@ Do the whole setup yourself, start to finish, without stopping to ask me. Instal
 
 1. Check the basics: macOS, Google Chrome, git, Go 1.25+ and Xcode&#x27;s command line tools (`xcode-select -p`). Install whatever is missing: `brew install go`, `xcode-select --install` (the command line tools are what let agents sign in with 1Password and use passkeys, so install them).
 2. Clone the repo to ~/agent-chrome-relay (if it&#x27;s already there, `git pull` instead). In the clone, run `./build`: it compiles Chrome Relay and signs it on this Mac. If it lists several code-signing identities, pick one yourself (a Developer ID Application, else an Apple Development one) and run `./build --identity &quot;&lt;that name&gt;&quot;`. Then run `./chrome-relay setup`.
-3. ME: loading the extension (Chrome lets only me do it). Copy the clone&#x27;s `extension` folder path to my clipboard (`pbcopy`) and tell me, in one short list: in each Chrome profile agents should use, open chrome://extensions, turn on Developer mode, Load unpacked, press Cmd+Shift+G and paste the path, then pin Chrome Relay (puzzle-piece icon, then the pin). Meanwhile do steps 4 and 7, then check with `chrome-relay doctor` until it sees the extension.
+3. ME: adding the extension (Chrome lets only me do it). Tell me, in one short list: in each Chrome profile agents should use, open https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom , click Add to Chrome, then pin Chrome Relay (puzzle-piece icon, then the pin). Meanwhile do steps 4 and 7, then check with `chrome-relay doctor` until it sees the extension.
 4. Run `chrome-relay notify test`. ME: allow the notification macOS shows (it&#x27;s only used when an agent is stuck on something only I can do).
 5. Run `chrome-relay doctor` and fix whatever it reports until every line is ok. Then run `chrome-relay identities`: the defaults (each profile&#x27;s own account) are fine; tell me what it found.
 6. Smoke test with the default profile:
@@ -451,11 +451,9 @@ Rules while you do this:
       </li>
       <li class="step reveal">
         <span class="step-n">02</span>
-        <h3>Load the extension in each profile</h3>
-        <p class="path" aria-label="chrome://extensions, then Developer mode, then Load unpacked, then the repo's extension folder">
-          <code>chrome://extensions</code><span class="sep" aria-hidden="true"></span>Developer mode<span class="sep" aria-hidden="true"></span>Load unpacked<span class="sep" aria-hidden="true"></span><code>extension/</code>
-        </p>
-        <p class="step-note">Repeat this in every Chrome profile your agents should use, pin it so you see its badge, then run <code>chrome-relay doctor</code> to check. Once the Chrome Web Store version is through review, this step becomes one click.</p>
+        <h3>Add the extension in each profile</h3>
+        <p class="path"><a href="https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom">Chrome Relay in the Chrome Web Store</a><span class="sep" aria-hidden="true"></span>Add to Chrome<span class="sep" aria-hidden="true"></span>pin it</p>
+        <p class="step-note">Repeat this in every Chrome profile your agents should use, pin it so you see its badge, then run <code>chrome-relay doctor</code> to check. The listing is unlisted: it is only at this link. Rather run your clone’s own copy? <code>chrome://extensions</code>, Developer mode, Load unpacked, <code>extension/</code>, instead of the store’s.</p>
       </li>
       <li class="step reveal">
         <span class="step-n">03</span>
@@ -509,7 +507,7 @@ Rules while you do this:
       <p class="plate plate--sm" id="faq-title">FAQ</p>
       <details>
         <summary>Is there a Chrome Web Store extension or an iPhone app?</summary>
-        <p>Both are in review and coming soon. For now you build from source: the extension is loaded from your download (<code>chrome://extensions</code>, Load unpacked), and the iPhone app, Chrome Relay Approve, is built from the repo with Xcode (<code>./ios/build</code>). The Mac service is always built and signed on your own Mac: that is what lets macOS tie its Keychain item to your signature.</p>
+        <p>The extension is in the <a href="https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom">Chrome Web Store</a> (unlisted, so only at that link). The iPhone app, Chrome Relay Approve, is in App Store review; until it’s out, build it from the repo with Xcode (<code>./ios/build</code>). The Mac service is always built and signed on your own Mac: that is what lets macOS tie its Keychain item to your signature.</p>
       </details>
       <details>
         <summary>Which password managers does it work with?</summary>
@@ -559,7 +557,7 @@ Rules while you do this:
     <a class="cta reveal" href="https://github.com/aindeev/agent-chrome-relay">
       <span class="cta-glow" aria-hidden="true"></span>
       <img class="cta-icon" src="icon-256.png" width="96" height="96" alt="">
-      <span class="cta-title" id="cta-title">Let your agents use your Chrome <span class="cta-sub">Free and open source, for macOS. Chrome Web Store and App Store versions coming soon.</span></span>
+      <span class="cta-title" id="cta-title">Let your agents use your Chrome <span class="cta-sub">Free and open source, for macOS. Extension in the Chrome Web Store; iPhone app coming soon.</span></span>
       <span class="cta-action">Get it on GitHub <span class="cta-arrow" aria-hidden="true">→</span></span>
     </a>
     <p class="cta-alt reveal">or <a href="https://github.com/aindeev/agent-chrome-relay#readme">read the docs</a></p>
