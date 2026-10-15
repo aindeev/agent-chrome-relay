@@ -52,6 +52,16 @@ func (c *cli) doctor() error {
 	if c.up() {
 		s, _ := c.relayStatus()
 		check(len(s.Profiles) > 0, "extension connected in: "+strings.Join(s.Profiles, ", "), "extension not connected in any profile: "+c.installExtension())
+		if d, err := c.ids(); err == nil {
+			var missing []string
+			for _, email := range s.Profiles {
+				if !d.obj("profiles").has(email) {
+					missing = append(missing, email)
+				}
+			}
+			check(len(missing) == 0, "identities.json lists every connected profile",
+				fmt.Sprintf("identities.json does not list %s (`%s identities` shows no profile): run `%s setup`", strings.Join(missing, ", "), c.Name, c.Name))
+		}
 		disk := manifestVersion(c.Ext)
 		var vers map[string]struct {
 			Version  string
