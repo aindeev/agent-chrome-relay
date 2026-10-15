@@ -106,7 +106,11 @@
   };
   const editable = (e, r) => !e.readOnly && e.getAttribute('aria-readonly') !== 'true' &&
     (['textbox', 'searchbox', 'spinbutton', 'password'].includes(r) || (r === 'combobox' && ['INPUT', 'TEXTAREA'].includes(e.tagName)));
-  const valueOf = e => e.type === 'password' || e.type === 'file' ? '' : ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.tagName) ? String(e.value) :
+  // fields whose value never shows: passwords, and a card's number and security code
+  const hidden = e => e.type === 'password' || /(^|\s)cc-(number|csc)(\s|$)/i.test(e.autocomplete || '') ||
+    /card.?num|cardnumber|cc-?num|cvc|cvv|csc|security.?code/i.test((e.name || '') + ' ' + (e.id || '')) ||
+    !!window.__crDrive?.secret?.has(e); // a field Chrome Relay filled with a card's number or code
+  const valueOf = e => hidden(e) || e.type === 'file' ? '' : ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.tagName) ? String(e.value) :
     e.isContentEditable || e.getAttribute('role') === 'combobox' ? (e.innerText || '').trim().slice(0, 200) : '';
   const labelOf = (e, r) => name(e) || (r === 'password' ? 'Password' : r === 'file' ? 'Choose file' : r);
   D.describe = e => { const r = role(e); return { role: r, label: labelOf(e, r) }; };
@@ -186,7 +190,7 @@
     } else {
       const ed = editable(e, rname);
       el.ops = ed ? ['fill', 'click'] : ['click'];
-      if (rname === 'password') el.filled = !!e.value; else el.value = valueOf(e);
+      if (hidden(e)) el.filled = !!e.value; else el.value = valueOf(e);
       if (ed && e.required) el.required = true;
     }
     elements.push(el);

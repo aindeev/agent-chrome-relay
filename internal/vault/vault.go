@@ -120,7 +120,8 @@ type cached struct {
 // Value is what a reference resolved to, for one page.
 type Value struct {
 	Value, Item, Field string
-	Kind               string // "secret" (concealed: password fields only), "otp" or "text"
+	Kind               string // "secret" (concealed: password fields only), "otp", "text" or "card" (see card.go)
+	Last4              string // a card's: the last four digits of its number, for prompts and the audit trail
 }
 
 func (v *Vault) now() time.Time {
@@ -242,6 +243,9 @@ func (v *Vault) approve(who Who, it op.Item, host, what, reason string) error {
 		v.mu.Lock()
 		if err != nil {
 			return err
+		}
+		if v.approvals == nil { // reopened meanwhile
+			v.approvals = map[string]time.Time{}
 		}
 		v.approvals[key] = v.now().Add(ttl) // from the approval: using the item doesn't extend it
 	} else if mode == "session" {
@@ -376,6 +380,9 @@ func (v *Vault) Resolve(ctx context.Context, ref, pageURL string, who Who) (Valu
 	if err != nil {
 		return Value{}, err
 	}
+	if it.Category == op.ItemCategoryCreditCard { // a card has no website: it pays wherever the person buys
+		return v.card(it, fieldName, u.Hostname(), who)
+	}
 	if len(it.Websites) == 0 {
 		return Value{}, fmt.Errorf("%q has no website, so it can't be filled anywhere: add one to the item in 1Password", it.Title)
 	}
@@ -401,7 +408,7 @@ func (v *Vault) Resolve(ctx context.Context, ref, pageURL string, who Who) (Valu
 		code, remaining, err := TOTP(f.Value, v.now())
 		if err != nil {
 			if f.Details != nil && f.Details.OTP() != nil && f.Details.OTP().Code != nil {
-				return Value{*f.Details.OTP().Code, it.Title, fieldTitle(f), "otp"}, nil
+				return Value{Value: *f.Details.OTP().Code, Item: it.Title, Field: fieldTitle(f), Kind: "otp"}, nil
 			}
 			return Value{}, err
 		}
@@ -411,17 +418,17 @@ func (v *Vault) Resolve(ctx context.Context, ref, pageURL string, who Who) (Valu
 			v.mu.Lock()
 			code, _, _ = TOTP(f.Value, v.now())
 		}
-		return Value{code, it.Title, fieldTitle(f), "otp"}, nil
+		return Value{Value: code, Item: it.Title, Field: fieldTitle(f), Kind: "otp"}, nil
 	case op.ItemFieldTypeConcealed:
 		if f.Value == "" {
 			return Value{}, fmt.Errorf("%q has an empty %q", it.Title, fieldTitle(f))
 		}
-		return Value{f.Value, it.Title, fieldTitle(f), "secret"}, nil
+		return Value{Value: f.Value, Item: it.Title, Field: fieldTitle(f), Kind: "secret"}, nil
 	}
 	if f.Value == "" {
 		return Value{}, fmt.Errorf("%q has an empty %q", it.Title, fieldTitle(f))
 	}
-	return Value{f.Value, it.Title, fieldTitle(f), "text"}, nil
+	return Value{Value: f.Value, Item: it.Title, Field: fieldTitle(f), Kind: "text"}, nil
 }
 
 func unescape(s string) string {

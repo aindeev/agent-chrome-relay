@@ -19,4 +19,6 @@ type Options struct {
 	// Tests only: 1Password and the person who approves, in place of the service accounts and Touch ID.
 	VaultStore  vault.Store
 	VaultPerson vault.Person
+	// Tests only: more hosts whose frames count as a payment provider's (where a card's details may go).
+	PaymentHosts []string
 }

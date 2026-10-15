@@ -91,6 +91,16 @@ window.__crDrive = { nodes: new Map(), ids: new WeakMap(), next: 1, rect: () => 
 <a href="/invoice">Next page</a>`,
 	"/login": `<title>Sign in</title><h1>Sign in</h1><form onsubmit="return false"><label>Username <input id="u" autocomplete="username"></label>
 <label>Password <input type="password" id="p" autocomplete="current-password"></label><button>Sign in</button></form>`,
+	// a shop's checkout with the card fields in a payment provider's frame (another origin), as Stripe does it
+	"/checkout": `<title>Checkout</title><h1>Checkout</h1><label>Email <input id="em" type="email"></label>
+<iframe src="OTHER/cardframe" width="520" height="220" style="border:0"></iframe>`,
+	"/checkout-own": `<title>Own checkout</title><h1>Pay</h1><label>Card number <input id="n" autocomplete="cc-number" oninput="last.value = this.value.replace(/\D/g, '').slice(-4)"></label>
+<label>Last four <input id="last" readonly></label>`,
+	"/cardframe": `<title>Card</title><style>input{display:block;margin:4px}</style>
+<input id="n" name="cardnumber" autocomplete="cc-number" aria-label="Card number" oninput="last.value = this.value.replace(/\D/g, '').slice(-4)">
+<input id="x" name="exp-date" autocomplete="cc-exp" aria-label="Expiration date MM / YY">
+<input id="c" name="cvc" autocomplete="cc-csc" aria-label="CVC" oninput="len.value = this.value.length">
+<input id="last" aria-label="Last four" readonly><input id="len" aria-label="Code length" readonly>`,
 	"/covered": `<title>Welcome</title><h1>Welcome</h1><button onclick="document.body.append('Continued')">Continue</button>
 <div style="position:fixed;inset:0;background:rgba(0,0,0,.4)"><div style="background:#fff;margin:30vh auto;width:300px">Cookies? <button>Accept</button></div></div>`,
 }
@@ -232,14 +242,22 @@ func fakeExtension(t *testing.T, chrome *cdpClient, relayURL, profile string) {
 	t.Cleanup(func() { ws.Close() })
 	var mu sync.Mutex
 	tabs, sessions, nextTab := map[int]string{}, map[string]int{}, 100
+	children := map[string]int{} // sessions of other sites' frames, as chrome.debugger reports them: tab and sessionId
 	send := func(v any) { mu.Lock(); defer mu.Unlock(); ws.WriteJSON(v) }
 	chrome.onEvent = func(m map[string]any) {
 		sid, _ := m["sessionId"].(string)
 		mu.Lock()
 		tab, ok := sessions[sid]
+		ctab, child := children[sid]
+		if p, _ := m["params"].(map[string]any); m["method"] == "Target.attachedToTarget" && p != nil && (ok || child) {
+			children[fmt.Sprint(p["sessionId"])] = max(tab, ctab)
+		}
 		mu.Unlock()
-		if ok {
+		switch {
+		case ok:
 			send(map[string]any{"event": map[string]any{"tabId": tab, "method": m["method"], "params": m["params"]}})
+		case child:
+			send(map[string]any{"event": map[string]any{"tabId": ctab, "sessionId": sid, "method": m["method"], "params": m["params"]}})
 		}
 	}
 	go func() {
@@ -288,6 +306,9 @@ func fakeExtension(t *testing.T, chrome *cdpClient, relayURL, profile string) {
 					mu.Lock()
 					sid := tabs[tab]
 					mu.Unlock()
+					if c, _ := m["sessionId"].(string); c != "" { // a frame's own session
+						sid = c
+					}
 					r, e := chrome.call(fmt.Sprint(m["method"]), m["params"], sid)
 					if e != "" {
 						reply = map[string]any{"id": m["id"], "error": e}
@@ -326,7 +347,7 @@ func newE2E(t *testing.T, own ...bool) *e2e {
 	who := relay.Caller{PID: 4242, App: "claude", Cwd: "/work", ClaudeSession: "e2e"}
 	pw := &e2eVault{}
 	s, err := relay.New(relay.Options{Home: home, Port: 1, Caller: func(int) relay.Caller { return who }, IsChrome: func(int) bool { return true },
-		VaultStore: pw, VaultPerson: pw})
+		VaultStore: pw, VaultPerson: pw, PaymentHosts: []string{"localhost"}}) // the test site's other origin stands in for Stripe
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -675,16 +696,27 @@ func TestDriveCommands(t *testing.T) {
 	want(out, code, 1, `"Delete" matches 2 controls; use a ref`)
 	out, code = run("tabs")
 	want(out, code, 0, "/form", "/divs")
-	// a same-origin frame is read and driven; another site's frame is named
+	// a same-origin frame and another site's frame are both read and driven
 	out, code = run("open", e.site.URL+"/frames")
 	want(out, code, 0, "✓ Frames")
 	time.Sleep(300 * time.Millisecond)
-	out, code = run("snapshot")
-	want(out, code, 0, `- textbox "Coupon code" [@e`, "in-frame", "frames from other sites, which this can't read: localhost:")
-	out, code = run("fill", "Coupon code", "SAVE10")
-	want(out, code, 0, "✓ fill")
-	out, code = run("click", "Apply")
-	want(out, code, 0, "(the page changed)")
+	snap, code := run("snapshot")
+	want(snap, code, 0, `- textbox "Coupon code" [@e`, "in-frame", "in-frame (localhost)")
+	if strings.Contains(snap, "frames from other sites") {
+		t.Error("another site's frame is still unread")
+	}
+	refs := regexp.MustCompile(`"(Coupon code|Apply)" \[(@e\d+)\] in-frame( \(localhost\))?`).FindAllStringSubmatch(snap, -1)
+	if len(refs) != 4 {
+		t.Fatalf("frame controls: %q", refs)
+	}
+	for i, code := range []string{"SAVE10", "SAVE20"} { // the same-site frame first, then the other site's
+		out, c := run("fill", refs[2*i][2], code)
+		want(out, c, 0, "✓ fill")
+		out, c = run("click", refs[2*i+1][2])
+		want(out, c, 0, "✓ click", "(the page changed)")
+		out, c = run("get", "value", refs[2*i][2])
+		want(out, c, 0, code)
+	}
 	out, code = run("wait", "text:Applied SAVE10", "--timeout", "3")
 	want(out, code, 0, "✓")
 	// a file field hidden behind its label
@@ -726,7 +758,7 @@ func TestDriveCommands(t *testing.T) {
 	out, code = run("is", "checked", "Remember me")
 	want(out, code, 0, "false")
 	// a ref from a page that's gone never names a control on the next
-	snap, _ := e.run("snapshot")
+	snap, _ = e.run("snapshot")
 	old := regexp.MustCompile(`"Next page" \[(@e\d+)\]`).FindStringSubmatch(snap)
 	if old == nil {
 		t.Fatal("no ref for Next page")
@@ -827,5 +859,99 @@ func TestDriveVaultFill(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(e.home, "audit", time.Now().UTC().Format("2006-01-02")+".jsonl"))
 	if strings.Contains(string(b), "hunter2") {
 		t.Error("the secret is in the audit trail")
+	}
+}
+
+// Paying with a card from 1Password, into a payment provider's frame on a shop's checkout.
+func TestDriveCardInPaymentFrame(t *testing.T) {
+	e := newE2E(t, true)
+	run := func(args ...string) (string, int) {
+		out, code := e.run(args...)
+		t.Log(strings.Join(args, " "), "\n", out)
+		return out, code
+	}
+	want := func(out string, code int, wantCode int, subs ...string) {
+		t.Helper()
+		if code != wantCode {
+			t.Errorf("exit %d, want %d: %s", code, wantCode, out)
+		}
+		for _, s := range subs {
+			if !strings.Contains(out, s) {
+				t.Errorf("missing %q in: %s", s, out)
+			}
+		}
+	}
+	approvals := func() int { e.vault.mu.Lock(); defer e.vault.mu.Unlock(); return len(e.vault.approvals) }
+	var all strings.Builder
+	out, code := run("open", e.site.URL+"/checkout")
+	want(out, code, 0, "✓ Checkout")
+	time.Sleep(300 * time.Millisecond)
+	snap, code := run("snapshot")
+	want(snap, code, 0, `textbox "Card number" [@e`, "in-frame (localhost)")
+	ref := func(label string) string {
+		m := regexp.MustCompile(`"` + regexp.QuoteMeta(label) + `" \[(@e\d+)\]`).FindStringSubmatch(snap)
+		if m == nil {
+			t.Fatalf("no ref for %s in: %s", label, snap)
+		}
+		return m[1]
+	}
+	number, expiry, cvc := ref("Card number"), ref("Expiration date MM / YY"), ref("CVC")
+	// a login never goes into a frame, and nobody is asked
+	out, code = run("fill", number, "op://Agents/Local site/password")
+	want(out, code, 1, "only typed into the page itself")
+	if n := approvals(); n != 0 {
+		t.Errorf("asked %d times for a login headed for a frame", n)
+	}
+	// the card: one approval, naming the shop and the card, covers its fields
+	for _, f := range [][2]string{{number, "number"}, {expiry, "expiry"}, {cvc, "cvc"}} {
+		out, code = run("fill", f[0], "op://Agents/Test card/"+f[1])
+		want(out, code, 0, "✓ fill")
+		all.WriteString(out)
+	}
+	if n := approvals(); n != 1 {
+		t.Errorf("approvals: %d, want 1", n)
+	} else if r := e.vault.approvals[0]; !strings.Contains(r, "pay on 127.0.0.1") || !strings.Contains(r, "•••• 4242") {
+		t.Errorf("approval: %s", r)
+	}
+	out, code = run("get", "value", "Last four")
+	want(out, code, 0, "4242")
+	out, code = run("get", "value", "Code length")
+	want(out, code, 0, "3")
+	out, code = run("get", "value", expiry) // a field filled from a card reads back empty, as a password does
+	if code != 0 || strings.TrimSpace(out) != "" {
+		t.Errorf("expiry read back: %d %q", code, out)
+	}
+	// no pictures of a checkout with a card in it, until the page moves on
+	out, code = run("screenshot", filepath.Join(t.TempDir(), "x.png"))
+	want(out, code, 1, "screenshots, snapshots and PDFs are off")
+	// what was typed never comes back
+	for _, args := range [][]string{{"snapshot"}, {"get", "value", number}, {"get", "value", cvc}} {
+		out, _ = run(args...)
+		all.WriteString(out)
+	}
+	if !strings.Contains(all.String(), `"Card number" [`+number+`] in-frame (localhost)`) && !strings.Contains(all.String(), "(filled)") {
+		t.Error("the snapshot doesn't say the card number is filled")
+	}
+	if s := all.String(); strings.Contains(s, "4242424242424242") || strings.Contains(s, "4242 4242 4242 4242") || strings.Contains(s, `"123"`) {
+		t.Errorf("a card value came back: %s", s)
+	}
+	// the right field for each value; and only card fields
+	out, code = run("fill", cvc, "op://Agents/Test card/number")
+	want(out, code, 1, "is for the card's cvc, not its number")
+	out, code = run("fill", "Email", "op://Agents/Test card/number")
+	want(out, code, 1, "doesn't look like a card field")
+	if n := approvals(); n != 1 {
+		t.Errorf("the refusals asked the person: %d approvals", n)
+	}
+	// a shop's own card field, in the page itself
+	out, code = run("open", e.site.URL+"/checkout-own")
+	want(out, code, 0, "✓ Own checkout")
+	out, code = run("fill", "Card number", "op://Agents/Test card/number")
+	want(out, code, 0, "✓ fill")
+	out, code = run("get", "value", "Last four")
+	want(out, code, 0, "4242")
+	b, _ := os.ReadFile(filepath.Join(e.home, "audit", time.Now().UTC().Format("2006-01-02")+".jsonl"))
+	if !strings.Contains(string(b), `"1password card fill"`) || !strings.Contains(string(b), "•••• 4242") || strings.Contains(string(b), "4242424242424242") {
+		t.Error("audit:", string(b))
 	}
 }

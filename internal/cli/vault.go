@@ -266,6 +266,7 @@ type vaultItem struct {
 	Password bool     `json:"password"`
 	OTP      bool     `json:"otp"`
 	Passkey  string   `json:"passkey"`
+	Card     string   `json:"card"`
 }
 
 type vaultSummary struct {
@@ -337,7 +338,10 @@ func formatVaultList(d vaultSummary, sources []source) string {
 				has = append(has, "passkey for "+i.Passkey)
 			}
 			sites := strings.Join(i.Websites, ", ")
-			if sites == "" {
+			switch {
+			case i.Card != "":
+				sites, has = "(card: pays at checkouts)", append(has, "card •••• "+i.Card)
+			case sites == "":
 				sites = "(no website: cannot be filled)"
 			}
 			row := fmt.Sprintf("    %s %s %s %s", pyFormat(cut(i.Title, 30), 30), pyFormat(cut(sites, 40), 40), pyFormat(cut(i.Username, 28), 28), strings.Join(has, ", "))

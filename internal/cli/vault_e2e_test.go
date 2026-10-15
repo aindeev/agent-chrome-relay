@@ -23,16 +23,32 @@ func (v *e2eVault) item() op.Item {
 		Fields: []op.ItemField{{ID: "username", Title: "username", FieldType: op.ItemFieldTypeText, Value: "agent-bot"},
 			{ID: "password", Title: "password", FieldType: op.ItemFieldTypeConcealed, Value: "hunter2-secret"}}}
 }
+
+// card: a Credit Card item, as 1Password's SDK gives it.
+func (v *e2eVault) card() op.Item {
+	return op.Item{ID: "card1", Title: "Test card", Category: op.ItemCategoryCreditCard, Fields: []op.ItemField{
+		{ID: "cardholder", Title: "cardholder name", FieldType: op.ItemFieldTypeText, Value: "Ada Lovelace"},
+		{ID: "ccnum", Title: "number", FieldType: op.ItemFieldTypeCreditCardNumber, Value: "4242 4242 4242 4242"},
+		{ID: "cvv", Title: "verification number", FieldType: op.ItemFieldTypeConcealed, Value: "123"},
+		{ID: "expiry", Title: "expiry date", FieldType: op.ItemFieldTypeMonthYear, Value: "202812"}}}
+}
+
 func (v *e2eVault) Vaults(context.Context) ([]op.VaultOverview, error) {
 	return []op.VaultOverview{{ID: "v", Title: "Agents"}}, nil
 }
 func (v *e2eVault) List(context.Context, string) ([]op.ItemOverview, error) {
-	it := v.item()
-	return []op.ItemOverview{{ID: it.ID, Title: it.Title, Category: it.Category, Websites: it.Websites}}, nil
+	var out []op.ItemOverview
+	for _, it := range []op.Item{v.item(), v.card()} {
+		out = append(out, op.ItemOverview{ID: it.ID, Title: it.Title, Category: it.Category, Websites: it.Websites})
+	}
+	return out, nil
 }
 func (v *e2eVault) Get(_ context.Context, _, id string) (op.Item, error) {
 	if id == "loc1" {
 		return v.item(), nil
+	}
+	if id == "card1" {
+		return v.card(), nil
 	}
 	return op.Item{}, errors.New("no item")
 }

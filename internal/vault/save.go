@@ -160,7 +160,7 @@ func (v *Vault) NewLogin(ctx context.Context, r SaveRef, pageURL string, who Who
 	if err != nil {
 		return Value{}, err
 	}
-	return Value{pw, saved.Title, "password", "secret"}, nil
+	return Value{Value: pw, Item: saved.Title, Field: "password", Kind: "secret"}, nil
 }
 
 // SaveOTP keeps a 2-step setup key the page showed (an otpauth:// URI or a base32 key) and returns the current
@@ -219,7 +219,7 @@ func (v *Vault) SaveOTP(ctx context.Context, r SaveRef, secret, pageURL string, 
 		return Value{}, err
 	}
 	code, _, _ := TOTP(secret, v.now())
-	return Value{code, title, "one-time password", "otp"}, nil
+	return Value{Value: code, Item: title, Field: "one-time password", Kind: "otp"}, nil
 }
 
 // longEnough: a real setup key is at least 80 bits (16 base32 characters); shorter text that happens to be base32
