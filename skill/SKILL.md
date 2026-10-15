@@ -133,7 +133,7 @@ chrome-relay fill @e7 "op://Shared with Chrome Relay/GitHub/otp" # the current 2
   reference. The relay types one character per box. The same works for a code you read from an email: `fill`
   the first box with the whole code. Then click Verify/Continue if the page doesn't submit by itself.
 - A login's value only goes to the item's own website (and its subdomains), over https, into the page itself
-  (not a frame inside it). Passwords and other secret fields only go into password fields. Cards: see below. A refusal comes back as
+  or a frame of its own origin (Apple's sign-in form), never another site's frame. Passwords and other secret fields only go into password fields. Cards: see below. A refusal comes back as
   `1Password: ...`: tell the person what it says; don't work around it.
 - Never try to read a secret back (eval of a field's value, screenshots of an unmasked field, copying it
   elsewhere), print it, or paste a reference into anything but a sign-in field. Values that come back through

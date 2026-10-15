@@ -22,7 +22,8 @@ func (a *Agent) who() vault.Who { return vault.Who{Name: describe(a.app, a.cwd),
 
 // fillSecret: `chrome-relay fill @e3 "op://Agents/GitHub/password"` types the real value from the shared vault.
 // The agent never gets it back: the vault (and the person's Touch ID) decides, the page's site must be the
-// item's, secrets go only into password fields of the page itself, and anything the page echoes is masked.
+// item's, secrets go only into password fields of the page itself (or of a frame of its own origin, which the page's
+// script reaches into anyway: Apple's sign-in form), and anything the page echoes is masked.
 func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 	p, u := a.p(), a.urls[t]
 	refuse := func(err error) {
@@ -47,7 +48,7 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 			return
 		}
 	} else if before.sid != "" || before.el.Frame || child != "" {
-		refuse(errors.New("secrets are only typed into the page itself, not into a frame inside it"))
+		refuse(errors.New("secrets are only typed into the page itself or a frame of its own origin, not into another site's frame"))
 		return
 	}
 	a.s.mu.Unlock()
@@ -62,7 +63,7 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 		return
 	}
 	if child != "" || before.sid != "" {
-		refuse(errors.New("secrets are only typed into the page itself, not into a frame inside it"))
+		refuse(errors.New("secrets are only typed into the page itself or a frame of its own origin, not into another site's frame"))
 		return
 	}
 	// what has focus is checked last, right before typing
@@ -71,7 +72,7 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 	case !a.tabs[t]:
 		refuse(errors.New("the tab was closed"))
 	case el != nil && el.Frame:
-		refuse(errors.New("the focused field is inside a frame; secrets are only typed into the page itself"))
+		refuse(errors.New("the focused field is inside another site's frame; secrets are only typed into the page itself or a frame of its own origin"))
 	case el == nil:
 		refuse(errors.New("no text field has focus: use `chrome-relay fill @eN <reference>` (or agent-browser's fill) on the field"))
 	case a.urls[t] != u:
@@ -89,7 +90,11 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 			return
 		}
 		a.filled[t] = v.Item
-		a.s.audit(a, "1password fill", "tab", t, "item", v.Item, "field", v.Field, "url", u)
+		if el.Inner {
+			a.s.audit(a, "1password fill", "tab", t, "item", v.Item, "field", v.Field, "url", u, "frame", "same origin")
+		} else {
+			a.s.audit(a, "1password fill", "tab", t, "item", v.Item, "field", v.Field, "url", u)
+		}
 		a.s.log("1password: filled", v.Field, "of", v.Item, "in tab", t)
 		a.ok(m, nil)
 	}
@@ -105,6 +110,7 @@ type field struct {
 	Hint  string `json:"hint"`  // its name, id, placeholder and labels, lower case: what kind of card field it is
 	Max   int    `json:"max"`   // its maxlength, if it has one
 	Focus bool   `json:"focus"` // its document has the page's focus (a frame's: the focus is in that frame)
+	Inner bool   `json:"inner"` // it is in a frame of the page's own origin (focused.js follows the focus into those)
 }
 
 // focusBoxExpr focuses (and selects) the n-th of the boxes focused.js found.

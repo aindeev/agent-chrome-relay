@@ -553,6 +553,19 @@ func TestVaultFillsSecretsAgentsNeverSee(t *testing.T) {
 	chrome.focused = map[string]any{"tag": "INPUT", "type": "text"}
 	chrome.mu.Unlock()
 	cmd("Input.insertText", map[string]any{"text": "op://Agents/GitHub/username"})
+	// a password field in a frame of the page's own origin (Apple's sign-in form) is the page; another site's frame is not
+	chrome.mu.Lock()
+	chrome.focused = map[string]any{"tag": "INPUT", "type": "password", "inner": true}
+	chrome.mu.Unlock()
+	if r := cmd("Input.insertText", map[string]any{"text": "op://Agents/GitHub/password"}); r["result"] == nil || typed()[len(typed())-1] != "hunter2-secret" {
+		t.Error("a same-origin frame's password field is filled:", r)
+	}
+	chrome.mu.Lock()
+	chrome.focused = map[string]any{"frame": true, "focus": true}
+	chrome.mu.Unlock()
+	if !strings.Contains(errMsg(cmd("Input.insertText", map[string]any{"text": "op://Agents/GitHub/password"})), "another site's frame") {
+		t.Error("another site's frame is refused")
+	}
 	chrome.mu.Lock()
 	chrome.focused = map[string]any{"tag": "INPUT", "type": "password"}
 	chrome.mu.Unlock()
@@ -563,7 +576,7 @@ func TestVaultFillsSecretsAgentsNeverSee(t *testing.T) {
 	if !strings.Contains(errMsg(cmd("Input.insertText", map[string]any{"text": "op://Private/GitHub/password"})), `only the vaults "Agents"`) {
 		t.Error("other vaults are refused")
 	}
-	if len(typed()) != 16 {
+	if len(typed()) != 17 {
 		t.Error("nothing typed on refusal")
 	}
 	a.mu.Lock()
@@ -574,7 +587,7 @@ func TestVaultFillsSecretsAgentsNeverSee(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 	b, _ := os.ReadFile(filepath.Join(h.home, "audit", time.Now().UTC().Format("2006-01-02")+".jsonl"))
-	if !strings.Contains(string(b), `"event":"1password fill","tab":`+fmt.Sprint(tab)+`,"item":"GitHub","field":"passwd"`) || !strings.Contains(string(b), "not evil.example") || strings.Contains(string(b), "hunter2") {
+	if !strings.Contains(string(b), `"event":"1password fill","tab":`+fmt.Sprint(tab)+`,"item":"GitHub","field":"passwd"`) || !strings.Contains(string(b), `"frame":"same origin"`) || !strings.Contains(string(b), "not evil.example") || strings.Contains(string(b), "hunter2") {
 		t.Error("audit: fills and refusals, no secrets:", string(b))
 	}
 	res, err := http.Get(h.srv.URL + "/vault?token=test-secret")

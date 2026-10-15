@@ -352,8 +352,8 @@ and the audit trail records only the last four.
   agent's sign-ins until it disconnects), or **never**. Change it with `chrome-relay vault approve
   sign-in|session|off`, which asks you first. Decline anything you didn't expect.
 - **Only the item's site.** A value is typed only into a page whose host is the item's website or a subdomain
-  of it, over https (or `localhost`), in the page itself rather than a frame inside it, like 1Password's own
-  filling. References to any other vault are refused.
+  of it, over https (or `localhost`), in the page itself or a frame of the page's own origin (Apple's sign-in
+  form; the page's script reaches into those anyway), never another site's frame, like 1Password's own filling. References to any other vault are refused.
 - **Secrets only into password fields**, so they show as dots on screen and in the agent's snapshots. If the
   agent (or the page) reads a filled secret back, the relay masks it in everything it sends the agent.
 - **Saving what agents create.** When an agent signs up for something or turns on 2-step verification for you,
