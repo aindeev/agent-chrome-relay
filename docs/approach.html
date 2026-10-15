@@ -162,15 +162,14 @@ first and says what changed. We only made them the default once they were as goo
 head to head through the same relay:</p>
 <table>
   <tr><th>What</th><th class="n">agent-browser</th><th class="n">chrome-relay</th></tr>
-  <tr><td>Test pages where the action really happened (23)</td><td class="n">20</td><td class="n">22</td></tr>
+  <tr><td>Test pages where the action really happened (23)</td><td class="n">21</td><td class="n">23</td></tr>
   <tr><td>open a page (real Chrome, background tab, local page)</td><td class="n">42–54 ms</td><td class="n">49–69 ms</td></tr>
   <tr><td>snapshot</td><td class="n">16–22 ms</td><td class="n">15–20 ms</td></tr>
   <tr><td>fill</td><td class="n">14–23 ms</td><td class="n">21–26 ms</td></tr>
   <tr><td>click</td><td class="n">19–25 ms</td><td class="n">27–29 ms</td></tr>
   <tr><td>read the page's text</td><td class="n">12–17 ms</td><td class="n">13–18 ms</td></tr>
 </table>
-<p>agent-browser missed a <code>&lt;div&gt;</code> used as a button and a link that is only an image, and said "Done"
-on another site's frame where nothing happened. Getting the speed took four things: naming the caller from the
+<p>agent-browser missed a <code>&lt;div&gt;</code> used as a button and a link that is only an image. Getting the speed took four things: naming the caller from the
 kernel over a Unix socket instead of <code>lsof</code> (0.3 ms instead of ~170 ms, for every command); filling a
 field through focus and a selection, as Playwright does; reporting an action at once and waiting for the page
 before the next step instead, usually while the agent thinks; and polling a loading page every 10 ms. agent-browser

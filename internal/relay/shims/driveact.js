@@ -2,6 +2,10 @@
 // about and can take the input; after, wait for the page to settle and read back what changed. Called as
 // (__crDriveAct)(phase, request); __crDrive comes from driver.js.
 (phase, q) => {
+  // fields whose value never comes back: passwords, and a card's number and security code
+  const hidden = e => e.type === 'password' || /(^|\s)cc-(number|csc)(\s|$)/i.test(e.autocomplete || '') ||
+    /card.?num|cardnumber|cc-?num|cvc|cvv|csc|security.?code/i.test((e.name || '') + ' ' + (e.id || '')) ||
+    !!window.__crDrive?.secret?.has(e); // a field Chrome Relay filled with a card's number or code
   const frameDoc = f => { try { return f.contentDocument && f.contentDocument.body ? f.contentDocument : null; } catch { return null; } };
   // the page's text, open shadow roots and same-origin frames included (innerText doesn't enter them); never what
   // fields hold, so a value just typed can't satisfy --until text:<that value>
@@ -55,12 +59,12 @@
       let el;
       try { el = deepQuery(q.selector); } catch { return { error: 'not a valid selector: ' + q.selector }; }
       if (!el) return { error: 'nothing matches ' + q.selector };
-      return { text: (el.type === 'password' ? '' : ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ? el.value : el.innerText ?? el.textContent ?? '').toString().slice(0, 200000) };
+      return { text: (hidden(el) ? '' : ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ? el.value : el.innerText ?? el.textContent ?? '').toString().slice(0, 200000) };
     }
     if (q.node) {
       const el = D && D.nodes.get(q.node);
       if (!el?.isConnected) return { error: 'that element is gone: take a new snapshot' };
-      return { text: (el.type === 'password' ? '' : ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ? el.value : el.innerText ?? el.textContent ?? '').toString().slice(0, 200000) };
+      return { text: (hidden(el) ? '' : ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ? el.value : el.innerText ?? el.textContent ?? '').toString().slice(0, 200000) };
     }
     return { text: deepText().slice(0, 200000) };
   }
@@ -132,7 +136,7 @@
     if (e.matches(':disabled') || e.closest('[aria-disabled="true"],[inert]')) return { refused: 'the element is disabled' };
     if ((q.kind === 'fill' || q.kind === 'type') && (e.readOnly || e.getAttribute('aria-readonly') === 'true')) return { refused: 'the field is read-only' };
     D.nav = null;
-    D.before = { value: e.type === 'password' ? !!e.value : e.value, checked: e.checked, expanded: e.getAttribute('aria-expanded'),
+    D.before = { value: hidden(e) ? !!e.value : e.value, checked: e.checked, expanded: e.getAttribute('aria-expanded'),
       muts: D.muts };
     if (q.kind === 'upload') return e.type === 'file' ? { done: true, node: D.identity(e) } : { refused: 'not a file field' };
     D.box(e).scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
@@ -181,7 +185,7 @@
     }
     // a text field takes the text through focus, as a person's click would give it: select what's there to replace
     // it (fill), or put the caret at the end (type). Anything else, or a field that won't take focus, is clicked.
-    if ((q.kind === 'fill' || q.kind === 'type') && (e.matches('input,textarea') || e.isContentEditable)) {
+    if ((q.kind === 'fill' || q.kind === 'type') && !q.noFocus && (e.matches('input,textarea') || e.isContentEditable)) {
       e.focus({ preventScroll: true });
       let active = document.activeElement;
       while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
@@ -234,9 +238,9 @@
           page: { url: location.href, title: document.title, key: location.href + '|' + performance.timeOrigin } };
         if (!q.node) return resolve({ ...out, changed: D.muts > (b.muts ?? D.muts) });
         if (!e?.isConnected) return resolve({ ...out, gone: true });
-        const value = e.type === 'password' ? !!e.value : e.value;
-        resolve({ ...out, value: e.type === 'password' ? undefined : (typeof value === 'string' ? value.slice(0, 200) : value),
-          filled: e.type === 'password' ? !!e.value : undefined, checked: e.checked,
+        const value = hidden(e) ? !!e.value : e.value;
+        resolve({ ...out, value: hidden(e) ? undefined : (typeof value === 'string' ? value.slice(0, 200) : value),
+          filled: hidden(e) ? !!e.value : undefined, checked: e.checked,
           changed: value !== b.value || e.checked !== b.checked || e.getAttribute('aria-expanded') !== b.expanded || D.muts > b.muts });
       };
       const tick = () => {

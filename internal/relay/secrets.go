@@ -30,16 +30,39 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 		a.s.log("1password: refused", ref, "in tab", t, "-", err.Error())
 		a.err(m, "1Password: "+err.Error())
 	}
-	if child != "" {
-		refuse(errors.New("secrets are only typed into the page itself, not into a frame inside it"))
+	// where the focus is, before anyone is asked: a card may go into a payment provider's frame, a login never
+	before := a.focusOf(p, t, child)
+	if before == nil {
+		refuse(errors.New("no text field has focus: use `chrome-relay fill @eN <reference>` (or agent-browser's fill) on the field"))
 		return
 	}
 	// 1Password and the person's Touch ID take a moment: don't hold the relay meanwhile
+	a.s.mu.Unlock()
+	card := a.s.vault.IsCard(context.Background(), ref, a.targetURLOf(t), a.who())
+	a.s.mu.Lock()
+	// what can be refused without 1Password is refused before the person is asked
+	if card {
+		if err := a.cardTarget(before, vault.CardFieldOf(ref)); err != nil {
+			refuse(err)
+			return
+		}
+	} else if before.sid != "" || before.el.Frame || child != "" {
+		refuse(errors.New("secrets are only typed into the page itself, not into a frame inside it"))
+		return
+	}
 	a.s.mu.Unlock()
 	v, err := a.s.vault.Resolve(context.Background(), ref, a.targetURLOf(t), a.who())
 	a.s.mu.Lock()
 	if err != nil {
 		refuse(err)
+		return
+	}
+	if v.Kind == "card" {
+		a.fillCard(t, child, m, ref, v, u, before)
+		return
+	}
+	if child != "" || before.sid != "" {
+		refuse(errors.New("secrets are only typed into the page itself, not into a frame inside it"))
 		return
 	}
 	// what has focus is checked last, right before typing
@@ -60,11 +83,11 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 		}
 		refuse(fmt.Errorf("%q of %q only goes into a password field, and the focused field is %s", v.Field, v.Item, what))
 	default:
+		a.hide(v.Value) // before it's typed: secrets, and one-time codes too: nothing the agent reads back shows them (a code split over boxes shows a digit per box)
 		if sent := a.typeText(p, t, el, v.Value); sent.Error != "" {
 			refuse(errors.New(sent.Error))
 			return
 		}
-		a.hide(v.Value) // secrets, and one-time codes too: nothing the agent reads back shows them (a code split over boxes shows a digit per box)
 		a.filled[t] = v.Item
 		a.s.audit(a, "1password fill", "tab", t, "item", v.Item, "field", v.Field, "url", u)
 		a.s.log("1password: filled", v.Field, "of", v.Item, "in tab", t)
@@ -78,6 +101,10 @@ type field struct {
 	Tag   string `json:"tag"`
 	Type  string `json:"type"`
 	Boxes int    `json:"boxes"` // a code split over one-character inputs: how many, from this one on
+	AC    string `json:"ac"`    // its autocomplete token (cc-number, ...)
+	Hint  string `json:"hint"`  // its name, id, placeholder and labels, lower case: what kind of card field it is
+	Max   int    `json:"max"`   // its maxlength, if it has one
+	Focus bool   `json:"focus"` // its document has the page's focus (a frame's: the focus is in that frame)
 }
 
 // focusBoxExpr focuses (and selects) the n-th of the boxes focused.js found.

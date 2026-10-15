@@ -3,6 +3,7 @@ package vault
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -27,7 +28,8 @@ type ItemSummary struct {
 	Username string   `json:"username"`
 	Password bool     `json:"password"`
 	OTP      bool     `json:"otp"`
-	Passkey  string   `json:"passkey"` // its relying party, if Chrome Relay made one
+	Passkey  string   `json:"passkey"`        // its relying party, if Chrome Relay made one
+	Card     string   `json:"card,omitempty"` // a Credit Card item: the last four digits of its number
 }
 
 // Summarize lists the vault for an agent, never values.
@@ -60,6 +62,15 @@ func (v *Vault) summarize(ctx context.Context, p place, o op.ItemOverview) (Item
 			return ItemSummary{}, false
 		}
 		s := ItemSummary{Vault: p.name, Account: p.account, ID: it.ID, Title: it.Title, Websites: websites(it)}
+		if it.Category == op.ItemCategoryCreditCard {
+			d := regexp.MustCompile(`\D`).ReplaceAllString(cardField(it, func(f op.ItemField) bool {
+				return f.FieldType == op.ItemFieldTypeCreditCardNumber || f.ID == "ccnum"
+			}), "")
+			if len(d) >= 12 {
+				s.Card = d[len(d)-4:]
+			}
+			return s, true
+		}
 		if f := PickField(it, "username", false); f != nil {
 			s.Username = f.Value
 		}

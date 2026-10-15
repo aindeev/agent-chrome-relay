@@ -218,15 +218,14 @@ chrome-relay close [--all]
   next one.
 - **The page can't steer it.** Its page scripts run in a script world of their own, so a site's JavaScript can't
   move where a click lands.
-- **What it reads.** Snapshots see into open shadow roots and same-site frames, and list clickable elements
-  without a role (a `<div>` with a click handler), file fields behind styled buttons, and radios hidden behind
-  their labels. Frames from other sites are named but not read.
+- **What it reads.** Snapshots see into open shadow roots, same-site frames and other sites' frames (a payment
+  provider's card fields show as `in-frame (js.stripe.com)`), and list clickable elements without a role (a
+  `<div>` with a click handler), file fields behind styled buttons, and radios hidden behind their labels.
 
 Compared with [agent-browser](https://github.com/vercel-labs/agent-browser) through the same relay, on 23 test
 pages that report whether the action really happened (`CHROME_RELAY_E2E=1 CHROME_RELAY_COMPARE=1 go test
-./internal/cli -run TestCompareWithAgentBrowser`): Chrome Relay's commands 22, agent-browser 20. agent-browser
-missed a `<div>` used as a button and a link that is only an image, and said "Done" on another site's frame
-where nothing happened; both fail on that frame. Speed in a real Chrome (background tabs, median of five,
+./internal/cli -run TestCompareWithAgentBrowser`): Chrome Relay's commands 23, agent-browser 21. agent-browser
+missed a `<div>` used as a button and a link that is only an image. Speed in a real Chrome (background tabs, median of five,
 a local page, four runs):
 
 | Command | agent-browser | chrome-relay |
@@ -332,6 +331,15 @@ chrome-relay fill @e2 "op://Shared with Chrome Relay/Twilio/username"
 chrome-relay fill @e3 "op://Shared with Chrome Relay/Twilio/password"
 chrome-relay fill @e7 "op://Shared with Chrome Relay/Twilio/otp"   # the current one-time code, from the item's TOTP secret
 ```
+
+**Cards.** A 1Password Credit Card item pays at checkouts: `chrome-relay fill @eN "op://<vault>/<card>/number"`
+(also `expiry`, `expiry-month`, `expiry-year`, `cvc`, `name`). A card has no website, so the relay decides where
+it goes: only into the matching card field of the checkout page itself (https) or of a payment provider's frame in
+it (Stripe, Braintree, Adyen, Checkout.com, Square, PayPal and a few more), never another site's frame, and logins
+still never go into frames. Every payment asks you, naming the agent, the shop and the card's last four digits,
+whatever you chose for sign-ins; one approval covers that card's fields on that site for two minutes. Card fields
+read back as filled, never their contents; after a card fill the tab takes no screenshots until the page moves on;
+and the audit trail records only the last four.
 
 - **Which account.** You may have several logins for one site (three Twilio items, say). The relay never picks:
   the agent names the item, choosing by the vault, title and username `chrome-relay vault` shows it, and asks you

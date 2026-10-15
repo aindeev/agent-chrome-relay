@@ -1,5 +1,5 @@
 (() => { let el = document.activeElement; while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
-  if (!el || el === document.body) return null; if (/^(IFRAME|FRAME)$/.test(el.tagName)) return { frame: true };
+  if (!el || el === document.body) return null; if (/^(IFRAME|FRAME)$/.test(el.tagName)) return { frame: true, focus: document.hasFocus() };
   if (!(el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return null;
   // a code split over one-character boxes (six inputs for a six-digit code): the boxes from this one on, kept for focusing in turn
   const one = (e) => e.tagName === "INPUT" && e.maxLength === 1 && !/^(checkbox|radio|hidden|submit|button)$/i.test(e.type) && e.getClientRects().length > 0;
@@ -8,4 +8,7 @@
     const all = [...c.querySelectorAll("input")].filter(one);
     if (all.length >= 4) { const g = all.slice(all.indexOf(el)); window[Symbol.for("chrome-relay.boxes")] = g; boxes = g.length; break; }
   }
-  return { tag: el.tagName, type: el.tagName === "INPUT" ? String(el.type || "text").toLowerCase() : "", boxes }; })()
+  // what kind of card field it is, if any: its autocomplete token, else its name, id, placeholder and label
+  const hint = [el.name, el.id, el.placeholder, el.getAttribute("aria-label"), ...(el.labels ? [...el.labels].map(l => l.innerText) : [])].join(" ").toLowerCase();
+  return { tag: el.tagName, type: el.tagName === "INPUT" ? String(el.type || "text").toLowerCase() : "", boxes,
+    ac: String(el.autocomplete || "").toLowerCase(), hint: hint.slice(0, 300), max: el.maxLength > 0 ? el.maxLength : 0, focus: document.hasFocus() }; })()

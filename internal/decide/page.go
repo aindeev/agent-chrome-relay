@@ -17,13 +17,14 @@ type Element struct {
 	Label    string   `json:"label"`
 	Ops      []string `json:"ops"` // click, fill, select
 	Value    string   `json:"value,omitempty"`
-	Filled   bool     `json:"filled,omitempty"` // password fields: whether something is in it (never the value)
+	Filled   bool     `json:"filled,omitempty"` // passwords, card numbers and codes: whether something is in it (never the value)
 	Checked  string   `json:"checked,omitempty"`
 	Selected string   `json:"selected,omitempty"`
 	Expanded string   `json:"expanded,omitempty"`
 	Options  []string `json:"options,omitempty"`
 	Onscreen bool     `json:"onscreen"`
-	Frame    bool     `json:"frame,omitempty"` // inside a same-origin frame
+	Frame    bool     `json:"frame,omitempty"` // inside a frame
+	Site     string   `json:"site,omitempty"`  // the frame's site, when it's another site's (a payment provider's card fields)
 	Required bool     `json:"required,omitempty"`
 }
 
@@ -44,7 +45,7 @@ func (e Element) Empty() bool {
 	if e.Role == "password" {
 		return !e.Filled
 	}
-	return e.can("fill") && strings.TrimSpace(e.Value) == ""
+	return e.can("fill") && !e.Filled && strings.TrimSpace(e.Value) == "" // Filled: a card number or code, never shown
 }
 
 // Page is what the driver saw.

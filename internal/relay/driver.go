@@ -10,7 +10,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -279,7 +282,7 @@ func (s *Server) serveDriver(w http.ResponseWriter, r *http.Request) {
 			Value        any
 			Error, Stale string
 		}
-		if err = a.actScript(t, "query", map[string]any{"node": q.Node, "selector": q.Selector, "what": q.What, "name": q.Name}, false, &res); err == nil && res.Error != "" {
+		if err = a.actScriptIn(t, a.frameOf(t, q), "query", map[string]any{"node": q.Node, "selector": q.Selector, "what": q.What, "name": q.Name}, false, &res); err == nil && res.Error != "" {
 			err = errors.New(res.Error)
 		}
 		if errors.Is(err, errNavigated) || res.Stale != "" {
@@ -326,7 +329,7 @@ func (s *Server) serveDriver(w http.ResponseWriter, r *http.Request) {
 		out, err = a.screenshot(t, q.Full)
 	case "/driver/text":
 		var res struct{ Text, Error string }
-		if err = a.actScript(t, "text", map[string]any{"node": q.Node, "selector": q.Selector}, false, &res); err == nil && res.Error != "" {
+		if err = a.actScriptIn(t, a.frameOf(t, q), "text", map[string]any{"node": q.Node, "selector": q.Selector}, false, &res); err == nil && res.Error != "" {
 			err = errors.New(res.Error)
 		}
 		s.audit(a, "do read", "tab", t, "selector", trunc(q.Selector, 120), "url", a.urls[t])
@@ -440,30 +443,58 @@ var errNavigated = errors.New("the page navigated")
 // eval runs a script in the page's own world for the driver (not the agent's own command: no audit line). Must
 // hold s.mu.
 func (a *Agent) eval(t int, expr string, await bool, v any) error {
-	return a.evalIn(t, 0, expr, await, v)
+	return a.evalIn(t, "", 0, expr, await, v)
 }
 
 // evalDriver runs one of the driver's own scripts (snapshot, act) in a script world of its own: the page's scripts
 // can't see or replace what it relies on (its node table, getBoundingClientRect, elementFromPoint), so they can't
 // steer where its clicks land. Must hold s.mu.
 func (a *Agent) evalDriver(t int, expr string, await bool, v any) error {
-	ctx, err := a.world(t)
+	return a.evalDriverIn(t, "", expr, await, v)
+}
+
+// evalDriverIn: the same in a frame from another site, which runs in a session of its own (sid; "" = the tab).
+func (a *Agent) evalDriverIn(t int, sid, expr string, await bool, v any) error {
+	ctx, err := a.world(t, sid)
 	if err != nil {
 		return err
 	}
-	return a.evalIn(t, ctx, expr, await, v)
+	return a.evalIn(t, sid, ctx, expr, await, v)
 }
 
-// world: the driver's script world in the tab's current document, made the first time it's needed. Must hold s.mu.
-func (a *Agent) world(t int) (int, error) {
-	if id := a.worlds[t]; id != 0 {
+// childFrame: a frame from another site (a payment provider's card fields, say), which Chrome runs in a process
+// and a DevTools session of its own.
+type childFrame struct {
+	tab           int
+	targetID, url string
+	parent        string // the session that reported it: "" = a frame in the page itself, else a frame inside that frame
+}
+
+// frameKey: a document's driver world: the tab's own (sid "") or another site's frame in it (its session).
+type frameKey struct {
+	tab int
+	sid string
+}
+
+// cdpIn: a DevTools command in the tab (sid "") or in a frame of it that runs in its own session.
+func (a *Agent) cdpIn(p *profile, t int, sid, method string, params any) extReply {
+	if sid == "" {
+		return a.cdp(p, t, method, params)
+	}
+	return a.s.extCall(p, map[string]any{"op": "cdp", "tabId": t, "sessionId": sid, "method": method, "params": params})
+}
+
+// world: the driver's script world in a document, made the first time it's needed. Must hold s.mu.
+func (a *Agent) world(t int, sid string) (int, error) {
+	k := frameKey{t, sid}
+	if id := a.worlds[k]; id != 0 {
 		return id, nil
 	}
 	p := a.p()
 	if p == nil {
 		return 0, errors.New("Chrome Relay extension is not connected")
 	}
-	r := a.cdp(p, t, "Page.getFrameTree", map[string]any{})
+	r := a.cdpIn(p, t, sid, "Page.getFrameTree", map[string]any{})
 	var tree struct {
 		FrameTree struct {
 			Frame struct {
@@ -474,21 +505,18 @@ func (a *Agent) world(t int) (int, error) {
 	if r.Error != "" || json.Unmarshal(r.Result, &tree) != nil || tree.FrameTree.Frame.ID == "" {
 		return 0, fmt.Errorf("could not reach the page: %s", r.Error)
 	}
-	r = a.cdp(p, t, "Page.createIsolatedWorld", map[string]any{"frameId": tree.FrameTree.Frame.ID, "worldName": "chrome-relay-driver"})
+	r = a.cdpIn(p, t, sid, "Page.createIsolatedWorld", map[string]any{"frameId": tree.FrameTree.Frame.ID, "worldName": "chrome-relay-driver"})
 	var w struct {
 		ID int `json:"executionContextId"`
 	}
 	if r.Error != "" || json.Unmarshal(r.Result, &w) != nil || w.ID == 0 {
 		return 0, errNavigated
 	}
-	if a.worlds == nil {
-		a.worlds = map[int]int{}
-	}
-	a.worlds[t] = w.ID
+	a.worlds[k] = w.ID
 	return w.ID, nil
 }
 
-func (a *Agent) evalIn(t, ctx int, expr string, await bool, v any) error {
+func (a *Agent) evalIn(t int, sid string, ctx int, expr string, await bool, v any) error {
 	p := a.p()
 	if p == nil {
 		return errors.New("Chrome Relay extension is not connected")
@@ -497,11 +525,12 @@ func (a *Agent) evalIn(t, ctx int, expr string, await bool, v any) error {
 	if ctx != 0 {
 		params["contextId"] = ctx
 	}
-	r := a.cdp(p, t, "Runtime.evaluate", params)
+	r := a.cdpIn(p, t, sid, "Runtime.evaluate", params)
 	if r.Error != "" {
-		if strings.Contains(r.Error, "context was destroyed") || strings.Contains(r.Error, "navigated") || strings.Contains(r.Error, "Cannot find context") {
-			if ctx != 0 && a.worlds[t] == ctx {
-				delete(a.worlds, t)
+		if strings.Contains(r.Error, "context was destroyed") || strings.Contains(r.Error, "navigated") || strings.Contains(r.Error, "Cannot find context") ||
+			(sid != "" && strings.Contains(r.Error, "session")) {
+			if k := (frameKey{t, sid}); ctx != 0 && a.worlds[k] == ctx {
+				delete(a.worlds, k)
 			}
 			return errNavigated
 		}
@@ -540,9 +569,19 @@ func (a *Agent) input(t int, method string, params map[string]any) error {
 	return err
 }
 
+// inputIn: the same in a frame of the tab that runs in a session of its own (sid; "" = the tab).
+func (a *Agent) inputIn(t int, sid, method string, params map[string]any) error {
+	_, err := a.callIn(t, sid, method, params)
+	return err
+}
+
 // call runs one DevTools command the way the agent's own would go, and returns its result; t 0 is a browser-level
 // command (Target.createTarget). Must hold s.mu.
 func (a *Agent) call(t int, method string, params map[string]any) (json.RawMessage, error) {
+	return a.callIn(t, "", method, params)
+}
+
+func (a *Agent) callIn(t int, sid, method string, params map[string]any) (json.RawMessage, error) {
 	b, _ := json.Marshal(params)
 	var failed string
 	var result json.RawMessage
@@ -558,7 +597,7 @@ func (a *Agent) call(t int, method string, params map[string]any) (json.RawMessa
 		result, _ = json.Marshal(v)
 	}}
 	if t != 0 {
-		m.SessionID = fmt.Sprintf("tab-%d", t)
+		m.SessionID = cmp.Or(sid, fmt.Sprintf("tab-%d", t))
 	}
 	a.onMessage(m)
 	if failed != "" {
@@ -582,6 +621,7 @@ func (a *Agent) open(q driveReq) (map[string]any, error) {
 		if t = tabOf(res.TargetID); !a.tabs[t] {
 			return nil, errors.New("Chrome did not open a tab")
 		}
+		a.attachFrames(t)
 	}
 	a.lastTab = t
 	out := map[string]any{"tab": t, "profile": a.email}
@@ -719,6 +759,7 @@ func (a *Agent) remember(t int, snap map[string]any) {
 	}
 	if a.shown[t] == nil || a.shownDoc[t] != doc {
 		a.shown[t], a.shownDoc[t] = map[int]map[string]string{}, doc
+		a.nodeFrame[t] = map[int]string{}
 	}
 	els, _ := snap["elements"].([]any)
 	for _, x := range els {
@@ -774,6 +815,7 @@ func (a *Agent) observe(t int, limit ...int) (map[string]any, error) {
 				a.refNext = int(next)
 			}
 			a.remember(t, snap)
+			a.observeFrames(t, n, snap)
 			delete(snap, "next")
 			return snap, nil
 		}
@@ -789,8 +831,130 @@ func (a *Agent) observe(t int, limit ...int) (map[string]any, error) {
 }
 
 func (a *Agent) actScript(t int, phase string, q any, await bool, v any) error {
+	return a.actScriptIn(t, "", phase, q, await, v)
+}
+
+func (a *Agent) actScriptIn(t int, sid, phase string, q any, await bool, v any) error {
 	b, _ := json.Marshal(q)
-	return a.evalDriver(t, fmt.Sprintf("(%s)(%q, %s)", strings.TrimSpace(driveActJS), phase, b), await, v)
+	return a.evalDriverIn(t, sid, fmt.Sprintf("(%s)(%q, %s)", strings.TrimSpace(driveActJS), phase, b), await, v)
+}
+
+// frameOf: the session of the other site's frame a request's control is in ("": the tab's page).
+func (a *Agent) frameOf(t int, q driveReq) string {
+	if q.Selector != "" || q.Node == 0 {
+		return ""
+	}
+	return a.nodeFrame[t][q.Node]
+}
+
+// attachFrames: frames from other sites in this tab (a payment provider's card fields) each get a DevTools session
+// of their own, so the driver can read and act in them. Settings the agent's own connection made are left alone.
+// Must hold s.mu.
+func (a *Agent) attachFrames(t int) {
+	if a.held {
+		a.input(t, "Target.setAutoAttach", map[string]any{"autoAttach": true, "waitForDebuggerOnStart": false, "flatten": true})
+	}
+}
+
+// frameBox: where another site's frame sits in its tab's page (its content box, in the page's viewport), and the
+// frame element's node there. Must hold s.mu.
+func (a *Agent) frameBox(t int, sid string) (x, y, w, h float64, owner int, ok bool) {
+	fr, known := a.frames[sid]
+	p := a.p()
+	if !known || p == nil {
+		return
+	}
+	var o struct {
+		BackendNodeID int `json:"backendNodeId"`
+	}
+	if r := a.cdp(p, t, "DOM.getFrameOwner", map[string]any{"frameId": fr.targetID}); r.Error != "" || json.Unmarshal(r.Result, &o) != nil || o.BackendNodeID == 0 {
+		return
+	}
+	var b struct {
+		Model struct {
+			Content []float64 `json:"content"`
+		} `json:"model"`
+	}
+	if r := a.cdp(p, t, "DOM.getBoxModel", map[string]any{"backendNodeId": o.BackendNodeID}); r.Error != "" || json.Unmarshal(r.Result, &b) != nil || len(b.Model.Content) < 8 {
+		return
+	}
+	q := b.Model.Content // four corners, clockwise from top left
+	return q[0], q[1], q[2] - q[0], q[5] - q[1], o.BackendNodeID, true
+}
+
+// observeFrames adds the controls of other sites' frames to a snapshot of their tab, placed where they show in
+// the page, and notes which frame each ref is in. Must hold s.mu.
+func (a *Agent) observeFrames(t, limit int, snap map[string]any) {
+	sids := []string{}
+	for sid, fr := range a.frames {
+		if fr.tab == t {
+			sids = append(sids, sid)
+		}
+	}
+	sort.Strings(sids)
+	els, _ := snap["elements"].([]any)
+	others, _ := snap["otherFrames"].([]any)
+	vh := 0.0
+	if sc, ok := snap["scroll"].(map[string]any); ok {
+		vh, _ = sc["view"].(float64)
+	}
+	for _, sid := range sids {
+		_, y, w, h, _, ok := a.frameBox(t, sid)
+		if !ok || w < 20 || h < 10 {
+			continue
+		}
+		var fs map[string]any
+		script := fmt.Sprintf("window.__crDriveLimit = %d; window.__crDriveStart = %d;\n", limit, max(a.refNext, 1)) + driverJS
+		if err := a.evalDriverIn(t, sid, script, false, &fs); err != nil || fs == nil {
+			continue
+		}
+		if next, ok := fs["next"].(float64); ok && int(next) > a.refNext {
+			a.refNext = int(next)
+		}
+		// the frame's address as its own document reports it (the one at attach time may still be about:blank)
+		where, _ := fs["url"].(string)
+		host := hostOf(where)
+		if fr := a.frames[sid]; where != "" {
+			fr.url = where
+			a.frames[sid] = fr
+		}
+		fe, _ := fs["elements"].([]any)
+		for _, e := range fe {
+			el, _ := e.(map[string]any)
+			if el == nil {
+				continue
+			}
+			n, _ := el["node"].(float64)
+			ey, _ := el["y"].(float64)
+			el["y"] = ey + y
+			el["onscreen"] = el["onscreen"] == true && y+ey < vh && y+ey+20 > 0
+			el["frame"], el["site"] = true, host
+			if a.nodeFrame[t] == nil {
+				a.nodeFrame[t] = map[int]string{}
+			}
+			a.nodeFrame[t][int(n)] = sid
+			role, _ := el["role"].(string)
+			label, _ := el["label"].(string)
+			if a.shown[t] != nil {
+				a.shown[t][int(n)] = map[string]string{"role": role, "label": label}
+			}
+			els = append(els, el)
+		}
+		if u, err := url.Parse(where); err == nil {
+			others = slices.DeleteFunc(others, func(o any) bool { return o == u.Host })
+		}
+	}
+	snap["elements"] = els
+	snap["otherFrames"] = others
+}
+
+// hostOf: a URL's host, or "".
+func hostOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 var keyCodes = map[string]int{"Enter": 13, "Tab": 9, "Escape": 27, "ArrowDown": 40, "ArrowUp": 38, "ArrowLeft": 37, "ArrowRight": 39,
@@ -799,6 +963,7 @@ var keyCodes = map[string]int{"Enter": 13, "Tab": 9, "Escape": 27, "ArrowDown": 
 // act: check the node is still what was decided on, act, wait for the page to settle, read back the effect, and
 // return the page as it is now. A refused or stale action did nothing.
 func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
+	inFrame := "" // the session of another site's frame the control is in, if it is
 	urlBefore := a.urls[t]
 	out := map[string]any{}
 	delete(a.dialogSeen, t)
@@ -895,7 +1060,23 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 			Node           int
 			El             map[string]string
 		}
-		if err := a.actScript(t, "prepare", map[string]any{"node": q.Node, "selector": q.Selector, "kind": q.Kind, "option": q.Option, "expect": q.Expect}, false, &prep); err != nil {
+		// a control in another site's frame: its page script runs there, and the frame comes into view first
+		sid := ""
+		if q.Selector == "" {
+			sid = a.nodeFrame[t][q.Node]
+		}
+		inFrame = sid
+		var owner int
+		if sid != "" {
+			var ok bool
+			if _, _, _, _, owner, ok = a.frameBox(t, sid); !ok {
+				return map[string]any{"stale": "the frame it was in is gone: take a new snapshot"}, nil
+			}
+			a.input(t, "DOM.scrollIntoViewIfNeeded", map[string]any{"backendNodeId": owner})
+		}
+		// a field in a frame takes its text through a click, which also moves the page's focus into the frame
+		if err := a.actScriptIn(t, sid, "prepare", map[string]any{"node": q.Node, "selector": q.Selector, "kind": q.Kind, "option": q.Option, "expect": q.Expect,
+			"noFocus": sid != ""}, false, &prep); err != nil {
 			if errors.Is(err, errNavigated) {
 				return map[string]any{"stale": "the page changed: observe again"}, nil
 			}
@@ -904,6 +1085,21 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 		if prep.Stale != "" || prep.Refused != "" {
 			snap, err := a.observe(t)
 			return map[string]any{"stale": prep.Stale, "refused": prep.Refused, "page": snap}, err
+		}
+		if sid != "" && !prep.Done { // where that is in the page, and the frame isn't covered there
+			fx, fy, _, _, _, ok := a.frameBox(t, sid)
+			if !ok {
+				return map[string]any{"stale": "the frame it was in is gone: take a new snapshot"}, nil
+			}
+			prep.X, prep.Y = fx+prep.X, fy+prep.Y
+			var hit struct {
+				BackendNodeID int `json:"backendNodeId"`
+			}
+			raw, err := a.call(t, "DOM.getNodeForLocation", map[string]any{"x": int(prep.X), "y": int(prep.Y)})
+			if err != nil || json.Unmarshal(raw, &hit) != nil || hit.BackendNodeID != owner {
+				snap, err := a.observe(t)
+				return map[string]any{"refused": "something in the page covers the frame it's in", "page": snap}, err
+			}
 		}
 		if prep.Node != 0 {
 			q.Node = prep.Node // a selector's element, for the read-back below
@@ -917,11 +1113,11 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 			if p == nil {
 				return nil, errors.New("Chrome Relay extension is not connected")
 			}
-			ctx, err := a.world(t)
+			ctx, err := a.world(t, sid)
 			if err != nil {
 				return nil, err
 			}
-			r := a.cdp(p, t, "Runtime.evaluate", map[string]any{"expression": fmt.Sprintf("window.__crDrive.nodes.get(%d)", q.Node), "contextId": ctx})
+			r := a.cdpIn(p, t, sid, "Runtime.evaluate", map[string]any{"expression": fmt.Sprintf("window.__crDrive.nodes.get(%d)", q.Node), "contextId": ctx})
 			var obj struct {
 				Result struct {
 					ObjectID string `json:"objectId"`
@@ -930,7 +1126,7 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 			if r.Error != "" || json.Unmarshal(r.Result, &obj) != nil || obj.Result.ObjectID == "" {
 				return nil, errors.New("could not reach the file field")
 			}
-			if err := a.input(t, "DOM.setFileInputFiles", map[string]any{"files": q.Files, "objectId": obj.Result.ObjectID}); err != nil {
+			if err := a.inputIn(t, sid, "DOM.setFileInputFiles", map[string]any{"files": q.Files, "objectId": obj.Result.ObjectID}); err != nil {
 				return nil, err
 			}
 		}
@@ -992,7 +1188,7 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 			Page       map[string]any `json:"page"`
 		}
 		var rb map[string]any
-		err := a.actScript(t, "after", map[string]any{"node": q.Node, "kind": q.Kind, "quick": q.Brief}, true, &rb)
+		err := a.actScriptIn(t, inFrame, "after", map[string]any{"node": q.Node, "kind": q.Kind, "quick": q.Brief}, true, &rb)
 		if err == nil {
 			b, _ := json.Marshal(rb)
 			json.Unmarshal(b, &after)
@@ -1007,6 +1203,8 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 			}
 		}
 		switch {
+		case inFrame != "" && (errors.Is(err, errNavigated) || after.Navigating):
+			// the frame moved on to another document of its own (a payment step): the page itself didn't
 		case errors.Is(err, errNavigated):
 			navigated = true
 			a.waitLoad(t)
@@ -1018,10 +1216,12 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 		case err != nil:
 			return nil, err
 		default:
-			if after.Busy || after.Leaving != "" { // a page that isn't changing needs no wait before the next step
-				a.unsettled[t] = unsettled{from: after.Leaving, until: time.Now().Add(5 * time.Second)}
+			if inFrame == "" { // (in a frame: its own document; the page's comes below)
+				if after.Busy || after.Leaving != "" { // a page that isn't changing needs no wait before the next step
+					a.unsettled[t] = unsettled{from: after.Leaving, until: time.Now().Add(5 * time.Second)}
+				}
+				snap = after.Page
 			}
-			snap = after.Page
 		}
 	}
 	switch {

@@ -106,6 +106,7 @@ type Agent struct {
 	setup                map[int][]step
 	paused               map[int]*pause
 	hidden               []string
+	hiddenWhole          []string // short secrets (a card's code), masked only as a whole JSON string
 	lastInput            map[int]time.Time
 	contexts             map[int]map[int]ctxInfo
 	handoffs             map[int]handoff
@@ -124,7 +125,10 @@ type Agent struct {
 	dialogArm            map[int]dialogAnswer              // tab -> how a held session answers the next confirm or prompt
 	dialogSeen           map[int][]string                  // tab -> dialogs answered since the driver's last action
 	console              map[int][]string                  // tab -> what a held session's pages logged and threw (the last 200 lines)
-	worlds               map[int]int                       // tab -> the driver's own script world in the current document
+	frames               map[string]childFrame             // session -> a frame from another site, which runs in a session of its own
+	cardFilled           map[int]bool                      // tab -> a card was filled there: no screenshots until it leaves the page
+	nodeFrame            map[int]map[int]string            // tab -> ref -> the session of the frame it's in ("" or absent: the tab itself)
+	worlds               map[frameKey]int                  // tab -> the driver's own script world in the current document
 	unsettled            map[int]unsettled                 // tab -> the driver's last action there may still be changing the page
 	shown                map[int]map[int]map[string]string // tab -> ref -> the role and label it named in a snapshot
 	shownDoc             map[int]string                    // tab -> the document those refs belong to
@@ -141,7 +145,8 @@ func (a *Agent) init() {
 	a.tabs, a.child, a.setup, a.paused = map[int]bool{}, map[string]int{}, map[int][]step{}, map[int]*pause{}
 	a.lastInput, a.contexts, a.handoffs, a.filled = map[int]time.Time{}, map[int]map[int]ctxInfo{}, map[int]handoff{}, map[int]string{}
 	a.newLogins = map[string]newLogin{}
-	a.worlds, a.unsettled, a.shown, a.shownDoc = map[int]int{}, map[int]unsettled{}, map[int]map[int]map[string]string{}, map[int]string{}
+	a.worlds, a.unsettled, a.shown, a.shownDoc = map[frameKey]int{}, map[int]unsettled{}, map[int]map[int]map[string]string{}, map[int]string{}
+	a.frames, a.nodeFrame, a.cardFilled = map[string]childFrame{}, map[int]map[int]string{}, map[int]bool{}
 	a.targetURLs, a.urls, a.mainFrames, a.popups, a.openerOf = map[int]string{}, map[int]string{}, map[int]string{}, map[string]int{}, map[int][2]int{}
 	// In order: `window.open(); w.location = url` sends "open" then "nav" back to back, and "nav" needs the tab "open" creates.
 	a.pageQ = make(chan pageCall, 1024)
@@ -166,7 +171,21 @@ func (a *Agent) dropTab(t int) bool {
 	}
 	delete(a.tabs, t)
 	a.order = slices.DeleteFunc(a.order, func(x int) bool { return x == t })
+	a.forgetFrames(t)
+	delete(a.nodeFrame, t)
+	delete(a.worlds, frameKey{t, ""})
+	delete(a.cardFilled, t)
 	return true
+}
+
+// forgetFrames: the tab's frame sessions are gone (it closed, or Chrome cut the debugger and attaches anew).
+func (a *Agent) forgetFrames(t int) {
+	for sid, fr := range a.frames {
+		if fr.tab == t {
+			delete(a.frames, sid)
+			delete(a.worlds, frameKey{t, sid})
+		}
+	}
 }
 func (a *Agent) tabIDs() []int { return slices.Clone(a.order) }
 
@@ -197,6 +216,9 @@ func (a *Agent) send(v any) {
 func (a *Agent) mask(s string) string {
 	for _, h := range a.hidden {
 		s = strings.ReplaceAll(s, h, "••••••••")
+	}
+	for _, h := range a.hiddenWhole {
+		s = strings.ReplaceAll(s, h, `"•••"`)
 	}
 	return s
 }
@@ -310,6 +332,12 @@ func (a *Agent) onMessage(m message) {
 		}
 		if child == "" && m.Method == "Runtime.runIfWaitingForDebugger" {
 			a.ok(m, nil)
+			return
+		}
+		// a picture of a checkout with a card filled in shows its number and code: masking can't reach pixels
+		if a.cardFilled[tab] && (m.Method == "Page.captureScreenshot" || m.Method == "Page.captureSnapshot" || m.Method == "Page.printToPDF" ||
+			m.Method == "Page.startScreencast") {
+			a.err(m, "a card from 1Password was filled in this tab: screenshots, snapshots and PDFs are off until the page moves on (they would show the card)")
 			return
 		}
 		if w := a.paused[tab]; w != nil { // tab is re-attaching (see onPaused)
@@ -703,6 +731,7 @@ func (a *Agent) adopt(t, opener int) bool {
 		return true
 	}
 	a.reveal(t, opener)
+	a.attachFrames(t) // a checkout popup's card frames too
 	a.s.log("adopted tab", t, "opened by", opener)
 	return true
 }
@@ -785,9 +814,18 @@ func (a *Agent) onExtEvent(e extEvent) bool {
 			a.answerDialog(e.TabID, fmt.Sprint(P["type"]), fmt.Sprint(P["message"]))
 		}
 	case "Page.frameNavigated":
-		if f, ok := P["frame"].(map[string]any); ok && (f["parentId"] == nil || f["parentId"] == "") {
+		f, _ := P["frame"].(map[string]any)
+		switch {
+		case e.SessionID != "": // another site's frame, in a session of its own: its own document is new
+			if fr, ok := a.frames[e.SessionID]; ok && f != nil && fmt.Sprint(f["id"]) == fr.targetID {
+				fr.url = fmt.Sprint(f["url"])
+				a.frames[e.SessionID] = fr
+				delete(a.worlds, frameKey{e.TabID, e.SessionID})
+			}
+		case f != nil && (f["parentId"] == nil || f["parentId"] == ""):
 			a.mainFrames[e.TabID] = fmt.Sprint(f["id"])
-			delete(a.worlds, e.TabID) // a new document: the driver's world went with the old one
+			delete(a.cardFilled, e.TabID)           // the checkout page is gone, and the card details shown on it
+			delete(a.worlds, frameKey{e.TabID, ""}) // a new document: the driver's world went with the old one
 			a.onTargetURL(e.TabID, fmt.Sprint(f["url"]))
 		}
 	case "Page.navigatedWithinDocument":
@@ -812,12 +850,12 @@ func (a *Agent) onExtEvent(e extEvent) bool {
 		case "Runtime.executionContextDestroyed":
 			id, _ := P["executionContextId"].(float64)
 			delete(a.contexts[e.TabID], int(id))
-			if a.worlds[e.TabID] == int(id) {
-				delete(a.worlds, e.TabID)
+			if k := (frameKey{e.TabID, ""}); a.worlds[k] == int(id) {
+				delete(a.worlds, k)
 			}
 		case "Runtime.executionContextsCleared":
 			a.contexts[e.TabID] = map[int]ctxInfo{}
-			delete(a.worlds, e.TabID)
+			delete(a.worlds, frameKey{e.TabID, ""})
 		}
 	}
 	if e.Method == "Runtime.bindingCalled" && P["name"] == binding {
@@ -833,11 +871,21 @@ func (a *Agent) onExtEvent(e extEvent) bool {
 	if e.Method == "Target.attachedToTarget" {
 		if sid, _ := P["sessionId"].(string); sid != "" {
 			a.child[sid] = e.TabID
+			if ti, ok := P["targetInfo"].(map[string]any); ok && ti["type"] == "iframe" { // another site's frame
+				// parent: the session that reported it: "" for a frame in the page itself, else a frame inside a frame
+				a.frames[sid] = childFrame{tab: e.TabID, targetID: fmt.Sprint(ti["targetId"]), url: fmt.Sprint(ti["url"]), parent: e.SessionID}
+				// it runs in a process of its own: it behaves as focused in a background tab only if told so too
+				if p := a.p(); p != nil {
+					a.s.extSend(p, map[string]any{"op": "cdp", "tabId": e.TabID, "sessionId": sid, "method": "Emulation.setFocusEmulationEnabled", "params": map[string]any{"enabled": true}})
+				}
+			}
 		}
 	}
 	if e.Method == "Target.detachedFromTarget" {
 		if sid, _ := P["sessionId"].(string); sid != "" {
 			delete(a.child, sid)
+			delete(a.frames, sid)
+			delete(a.worlds, frameKey{e.TabID, sid})
 		}
 	}
 	sid := e.SessionID
@@ -858,6 +906,7 @@ func (a *Agent) onPaused(t int) bool {
 			delete(a.child, sid)
 		}
 	}
+	a.forgetFrames(t)
 	return true
 }
 

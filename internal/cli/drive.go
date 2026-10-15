@@ -168,7 +168,7 @@ func target(page decide.Page, what, op string) (decide.Element, error) {
 func elementLine(e decide.Element) string {
 	s := fmt.Sprintf("- %s %q [@e%d]", e.Role, e.Label, e.Node)
 	switch {
-	case e.Role == "password" && e.Filled:
+	case e.Filled: // a password, or a card's number or security code: whether it's filled, never what
 		s += " (filled)"
 	case e.Value != "" && e.Role != "radio" && e.Role != "checkbox":
 		s += fmt.Sprintf(" = %q", cut(e.Value, 80))
@@ -196,6 +196,9 @@ func elementLine(e decide.Element) string {
 	}
 	if e.Frame {
 		s += " in-frame"
+		if e.Site != "" {
+			s += " (" + e.Site + ")"
+		}
 	}
 	return s
 }

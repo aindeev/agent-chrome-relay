@@ -132,8 +132,8 @@ chrome-relay fill @e7 "op://Shared with Chrome Relay/GitHub/otp" # the current 2
 - **2-step codes in separate boxes** (six inputs for six digits): `fill` the first box with the `otp`
   reference. The relay types one character per box. The same works for a code you read from an email: `fill`
   the first box with the whole code. Then click Verify/Continue if the page doesn't submit by itself.
-- A value only goes to the item's own website (and its subdomains), over https, into the page itself (not a
-  frame inside it). Passwords and other secret fields only go into password fields. A refusal comes back as
+- A login's value only goes to the item's own website (and its subdomains), over https, into the page itself
+  (not a frame inside it). Passwords and other secret fields only go into password fields. Cards: see below. A refusal comes back as
   `1Password: ...`: tell the person what it says; don't work around it.
 - Never try to read a secret back (eval of a field's value, screenshots of an unmasked field, copying it
   elsewhere), print it, or paste a reference into anything but a sign-in field. Values that come back through
@@ -143,6 +143,29 @@ chrome-relay fill @e7 "op://Shared with Chrome Relay/GitHub/otp" # the current 2
   with Chrome Relay (<short name>)" --account <email>` for each account (1Password asks them to approve once),
   and ask them to move the logins agents may use into that vault. Built without 1Password (`chrome-relay
   doctor` says so)? Rebuild with Xcode's command line tools (`./build` in the clone, then `chrome-relay update`).
+
+## Paying with a card from 1Password
+
+When the person asks you to buy something with a card they keep in the vault (a 1Password **Credit Card** item;
+`chrome-relay vault` lists it), fill the checkout's card fields with references, one field each:
+
+```bash
+chrome-relay snapshot                     # card fields in Stripe's (or another provider's) frame show as in-frame (js.stripe.com)
+chrome-relay fill @e12 "op://Shared with Chrome Relay/Venn card/number"
+chrome-relay fill @e13 "op://Shared with Chrome Relay/Venn card/expiry"   # MM/YY; expiry-month and expiry-year for split fields
+chrome-relay fill @e14 "op://Shared with Chrome Relay/Venn card/cvc"
+chrome-relay fill @e15 "op://Shared with Chrome Relay/Venn card/name"     # if the form asks for the name on the card
+```
+
+- **The person approves every payment**: Touch ID (or their iPhone) names you, the shop and the card's last four
+  digits. One approval covers that card's fields on that site for 2 minutes. Tell them it's coming.
+- Card details go only into the checkout page itself (https) or a payment provider's frame in it (Stripe,
+  Braintree, Adyen, Checkout.com, Square, PayPal, ...), and only into the matching field: the number into the card
+  number field, the code into the security-code field. A refusal (`1Password: ...`) says why; don't work around it.
+- Only use the card the person named, for the purchase they asked for. Check the amount and what's in the cart
+  before you fill, and don't click Pay / Buy / Subscribe without their go-ahead if anything differs.
+- Nothing you fill comes back: card fields read back as `(filled)`, and after a card fill that tab takes no
+  screenshots, snapshots or PDFs until the page moves on (they would show the card). Read the page's text instead.
 
 ## Saving new logins and 2-step codes
 
