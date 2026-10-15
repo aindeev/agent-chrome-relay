@@ -10,6 +10,10 @@
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square"></a>
 </p>
 
+<p align="center">
+  <a href="https://testflight.apple.com/join/zhpm8gND"><img alt="iPhone app: join the beta on TestFlight" src="https://img.shields.io/badge/iPhone%20app-Join%20the%20beta%20on%20TestFlight-0d96f6?style=for-the-badge&logo=apple&logoColor=white"></a>
+</p>
+
 **Website:** https://agent-chrome-relay.aindeev.com
 
 
@@ -45,8 +49,9 @@ it's no longer required. How the two compare: [Step by step](#step-by-step-chrom
 It's opt-in: nothing installs the extension for you, and it only runs on Macs whose owner set it up.
 
 **Status.** The Chrome extension is in the [Chrome Web Store](https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom) (unlisted: only at that link). The
-Mac service is built from source on your Mac (below). The iPhone app, Chrome Relay Approve, is in App Store review:
-until it's out, you build it with Xcode. Signing in with a password manager works with
+Mac service is built from source on your Mac (below). The iPhone app, Chrome Relay Approve, is in App Store review
+and [on TestFlight](https://testflight.apple.com/join/zhpm8gND) now: install TestFlight on the iPhone and open the
+link there. Signing in with a password manager works with
 **1Password only** for now.
 
 **The core** is background tabs with your logins, `chrome-relay do`, Google sign-in hops and an audit trail.
@@ -400,8 +405,9 @@ two layers:
 ### Approving from your iPhone
 
 When you're away from the Mac, a paired iPhone can approve instead: `chrome-relay phone pair` (after Touch ID)
-shows a QR code; scan it with the iPhone's Camera and open it in *Chrome Relay Approve* (`ios/`, built and
-installed with `./ios/build`, or sent to TestFlight with `./ios/release` so others install it from there). From then on every approval goes to Touch ID here and to the iPhone at once, and
+shows a QR code; scan it with the iPhone's Camera and open it in *Chrome Relay Approve* ([join the beta on
+TestFlight](https://testflight.apple.com/join/zhpm8gND), or build it from `ios/` with `./ios/build`; `./ios/release`
+sends your own build to TestFlight). From then on every approval goes to Touch ID here and to the iPhone at once, and
 the first answer wins. The iPhone shows the Mac, the agent and what it asks, and approves with Face ID: its key
 for that lives in the iPhone's Secure Enclave, and the Mac checks the signature against the key it paired with,
 so nothing in between can approve.
