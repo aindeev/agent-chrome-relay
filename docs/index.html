@@ -99,6 +99,7 @@
           <span class="badge badge-ink">MIT · open source</span>
           <span class="badge">macOS · Chrome</span>
           <a class="badge" href="https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom">Extension in the Chrome Web Store</a>
+          <a class="badge" href="https://testflight.apple.com/join/zhpm8gND">iPhone app on TestFlight</a>
         </p>
         <div class="btn-row">
           <a class="btn btn-ink btn-lg" href="https://github.com/aindeev/agent-chrome-relay">Get it on GitHub</a>
@@ -243,7 +244,7 @@
 
       <article class="tile reveal">
         <h3>You approve, on your Mac or your iPhone</h3>
-        <p>Each sign-in asks you first, naming the agent, the site and the account: Touch ID on your Mac, or Face ID on a paired iPhone when you’re away, whichever answers first. Passkeys Chrome Relay makes are kept in your Mac’s Secure Enclave and never leave it. The iPhone app, Chrome Relay Approve, is <strong>in App Store review</strong>; until it’s out you can build it from the repo with Xcode.</p>
+        <p>Each sign-in asks you first, naming the agent, the site and the account: Touch ID on your Mac, or Face ID on a paired iPhone when you’re away, whichever answers first. Passkeys Chrome Relay makes are kept in your Mac’s Secure Enclave and never leave it. The iPhone app, Chrome Relay Approve, is <a href="https://testflight.apple.com/join/zhpm8gND"><strong>on TestFlight</strong></a>, and in App Store review.</p>
       </article>
 
       <article class="tile tile--wide reveal">
@@ -396,7 +397,7 @@
       <p class="plate">Install</p>
       <h2 id="install-title">Set it up <span class="hl">once per Mac</span></h2>
       <p class="lede">You build the Mac service from source, which takes about two minutes, and add the extension from the Chrome Web Store. You need macOS, Google Chrome and <a href="https://go.dev/dl/">Go</a>. For the full password experience (signing in with 1Password, passkeys in your Mac’s Secure Enclave, approving on your iPhone) you also need Xcode’s command line tools; all of that is optional.</p>
-      <p class="lede lede--note"><strong>Coming soon:</strong> the iPhone app, Chrome Relay Approve, in the App Store. It’s in review; until it’s out, build it from the repo, as below.</p>
+      <p class="lede lede--note"><strong>iPhone app:</strong> Chrome Relay Approve is <a href="https://testflight.apple.com/join/zhpm8gND">on TestFlight</a>. Install TestFlight on your iPhone, then open the link there. It’s in App Store review too.</p>
     </div>
 
     <div class="agent-setup reveal" id="agent-setup">
@@ -468,12 +469,12 @@ Rules while you do this:
       <li class="step reveal">
         <span class="step-n">04</span>
         <h3>Optional: approve from your iPhone</h3>
-        <button class="cmd cmd--block" type="button" data-copy="./ios/build &amp;&amp; chrome-relay phone pair" aria-label="Copy: ./ios/build &amp;&amp; chrome-relay phone pair">
-          <span class="cmd-prompt" aria-hidden="true">$</span><span class="cmd-text">./ios/build &amp;&amp; chrome-relay phone pair</span>
+        <button class="cmd cmd--block" type="button" data-copy="chrome-relay phone pair" aria-label="Copy: chrome-relay phone pair">
+          <span class="cmd-prompt" aria-hidden="true">$</span><span class="cmd-text">chrome-relay phone pair</span>
           <span class="cmd-copy" aria-hidden="true"><svg viewBox="0 0 16 16" width="15" height="15"><rect x="5" y="5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M11 5V2H2v9h3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></span>
           <span class="cmd-done" aria-hidden="true">copied</span>
         </button>
-        <p class="step-note">The iPhone app is in App Store review. For now, <code>./ios/build</code> builds it with Xcode and installs it on your plugged-in iPhone. <code>chrome-relay phone pair</code> then shows a QR code to scan. After that, approvals go to Touch ID on the Mac and Face ID on the iPhone at once.</p>
+        <p class="step-note">Install Chrome Relay Approve <a href="https://testflight.apple.com/join/zhpm8gND">from TestFlight</a> (open the link on your iPhone). <code>chrome-relay phone pair</code> then shows a QR code to scan with the iPhone’s Camera. (To build the app yourself instead, <code>./ios/build</code> installs it on your plugged-in iPhone.) After that, approvals go to Touch ID on the Mac and Face ID on the iPhone at once.</p>
       </li>
     </ol>
 
@@ -507,7 +508,7 @@ Rules while you do this:
       <p class="plate plate--sm" id="faq-title">FAQ</p>
       <details>
         <summary>Is there a Chrome Web Store extension or an iPhone app?</summary>
-        <p>The extension is in the <a href="https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom">Chrome Web Store</a> (unlisted, so only at that link). The iPhone app, Chrome Relay Approve, is in App Store review; until it’s out, build it from the repo with Xcode (<code>./ios/build</code>). The Mac service is always built and signed on your own Mac: that is what lets macOS tie its Keychain item to your signature.</p>
+        <p>The extension is in the <a href="https://chromewebstore.google.com/detail/mdglmmedlbkjphgolcejpphnbclkfnom">Chrome Web Store</a> (unlisted, so only at that link). The iPhone app, Chrome Relay Approve, is <a href="https://testflight.apple.com/join/zhpm8gND">on TestFlight</a> (install TestFlight, then open the link on your iPhone) and in App Store review; you can also build it from the repo with Xcode (<code>./ios/build</code>). The Mac service is always built and signed on your own Mac: that is what lets macOS tie its Keychain item to your signature.</p>
       </details>
       <details>
         <summary>Which password managers does it work with?</summary>
@@ -557,7 +558,7 @@ Rules while you do this:
     <a class="cta reveal" href="https://github.com/aindeev/agent-chrome-relay">
       <span class="cta-glow" aria-hidden="true"></span>
       <img class="cta-icon" src="icon-256.png" width="96" height="96" alt="">
-      <span class="cta-title" id="cta-title">Let your agents use your Chrome <span class="cta-sub">Free and open source, for macOS. Extension in the Chrome Web Store; iPhone app coming soon.</span></span>
+      <span class="cta-title" id="cta-title">Let your agents use your Chrome <span class="cta-sub">Free and open source, for macOS. Extension in the Chrome Web Store; iPhone app on TestFlight.</span></span>
       <span class="cta-action">Get it on GitHub <span class="cta-arrow" aria-hidden="true">→</span></span>
     </a>
     <p class="cta-alt reveal">or <a href="https://github.com/aindeev/agent-chrome-relay#readme">read the docs</a></p>
