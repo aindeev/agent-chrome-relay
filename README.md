@@ -195,6 +195,9 @@ chrome-relay console | errors | cookies | dialog accept|dismiss | tabs | tab <id
 chrome-relay close [--all]
 ```
 
+- **Selector counts.** `get count <css>` includes matches in open shadow roots and same-origin frames,
+  the same roots as single-target selector commands. Other-origin frames stay outside that selector scope.
+
 - **Every action is checked.** Before it: the control is still the one the agent saw, enabled, on screen and not
   covered (or about to hit another control inside it). After it: what changed, at once; the wait for the page to
   finish comes before the next step, usually while the agent is thinking.
