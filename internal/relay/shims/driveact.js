@@ -26,19 +26,29 @@
     visit(document);
     return parts.join('\n');
   };
+  const innerRoot = h => h.shadowRoot || ((h.tagName === 'IFRAME' || h.tagName === 'FRAME') && frameDoc(h));
   // the first match in the page, its open shadow roots and same-origin frames
   function deepQuery(sel) {
     const search = root => {
       const hit = root.querySelector(sel);
       if (hit) return hit;
       for (const h of root.querySelectorAll('*')) {
-        const inner = h.shadowRoot || ((h.tagName === 'IFRAME' || h.tagName === 'FRAME') && frameDoc(h));
+        const inner = innerRoot(h);
         const found = inner && search(inner);
         if (found) return found;
       }
       return null;
     };
     return search(document);
+  }
+  // Count the same accessible roots as the single-target selector commands.
+  function deepCount(sel, root = document) {
+    let count = root.querySelectorAll(sel).length;
+    for (const h of root.querySelectorAll('*')) {
+      const inner = innerRoot(h);
+      if (inner) count += deepCount(sel, inner);
+    }
+    return count;
   }
   if (phase === 'check') {
     const text = deepText();
@@ -104,7 +114,7 @@
   const e = resolve(q.node, q.selector);
   const up = D.up;
   if (phase === 'query') {
-    if (q.what === 'count') { try { return { value: document.querySelectorAll(q.selector).length }; } catch { return { error: 'not a valid selector: ' + q.selector }; } }
+    if (q.what === 'count') { try { return { value: deepCount(q.selector) }; } catch { return { error: 'not a valid selector: ' + q.selector }; } }
     if (!e?.isConnected) return { error: q.selector ? 'nothing matches ' + q.selector : 'that element is gone: take a new snapshot' };
     if (q.what === 'html') { // never what fields hold: a page may mirror a typed password into its value attribute
       const c = e.cloneNode(true);
