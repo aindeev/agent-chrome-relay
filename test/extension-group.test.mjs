@@ -63,3 +63,23 @@ test('adopted popups wait for the same window grouping operation', async () => {
   assert.ok(f.groupCalls.some((m) => m.tabIds.includes(9) && m.groupId !== undefined));
   assert.ok(f.messages.some((m) => m.adopted?.tabId === 9));
 });
+
+// Chrome permits the person to move a whole group to another window. Its ID
+// stays valid, but it no longer belongs to the window recorded by this worker.
+test('a group moved to another window is not reused in its old window', async () => {
+  const f = await extensionFixture({ windowIds: [1, 1, 1] });
+  await f.handle({ op: 'create', id: 1 });
+  const movedId = [...f.groups.keys()][0];
+  f.groups.get(movedId).windowId = 2;
+
+  await f.handle({ op: 'create', id: 2 });
+  assert.deepEqual(f.groupCalls[1].createProperties, { windowId: 1 });
+  assert.equal(f.groupCalls[1].groupId, undefined);
+  assert.equal(f.groups.get(movedId).windowId, 2, 'leave the moved group alone');
+  const replacementId = f.persisted.agentGroups.find(([window]) => window === 1)[1];
+  assert.notEqual(replacementId, movedId);
+
+  await f.handle({ op: 'create', id: 3 });
+  assert.equal(f.groupCalls[2].groupId, replacementId, 'reuse the replacement in its own window');
+  assert.equal(f.messages.filter((m) => m.result?.tabId).length, 3);
+});

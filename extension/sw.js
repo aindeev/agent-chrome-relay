@@ -96,7 +96,8 @@ const flush = () => { while (outbox.length && ws && ws.readyState === 1) ws.send
 async function agentGroup(windowId) {
   await restored;
   const g = agentGroups.get(windowId);
-  return g != null && (await chrome.tabGroups.get(g).catch(() => null)) ? g : null;
+  const group = g != null ? await chrome.tabGroups.get(g).catch(() => null) : null;
+  return group?.windowId === windowId ? g : null;
 }
 const grouping = new Map(); // one group update in flight per window
 async function groupAgentTab(tabId, windowId) {
