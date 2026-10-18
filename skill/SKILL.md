@@ -27,7 +27,7 @@ never guessed: use the ref it suggests. Every action first checks the control is
 and not covered, and says what changed. Refs don't carry over to a new page: snapshot again after it changes.
 `chrome-relay help` lists the rest: `select`, `check`/`uncheck`, `type`, `press Enter`, `hover`, `dblclick`,
 `drag`, `upload`, `scroll`, `back`, `reload`, `get value|html|attr|count|url|title`, `is visible|enabled|checked`,
-`eval`, `pdf`, `console`, `errors`, `cookies`, `dialog accept|dismiss`, `tabs`, `tab <id>`, `cdp <Domain.method>`.
+`eval`, `pdf`, `console`, `errors`, `cookies`, `dialog accept|dismiss`, `tabs`, `tab <id>`, `downloads`, `save`, `cdp <Domain.method>`.
 
 Rules:
 - Only Claude Code, Codex, Cursor, Paseo and pi processes are accepted. Agents that set no session id of their
@@ -58,7 +58,8 @@ Rules:
 - Passwords only as 1Password references (`op://...`), never as text you type: a password in your command
   would end up in your transcript. Pick the account that matches the person's request.
 - Popups and "open in new tab" links open as new hidden tabs that belong to you (`chrome-relay tabs`, then
-  `chrome-relay tab <id>`). A page's alerts are accepted; a confirm or prompt is dismissed unless you said
+  `chrome-relay tab <id>`). Never replace `window.open` or stub popups yourself: the relay already routes them,
+  and a stub breaks the page. A page's alerts are accepted; a confirm or prompt is dismissed unless you said
   beforehand `chrome-relay dialog accept [text]`.
 - Everything you do is in the audit trail (`chrome-relay audit`). Typed text is stored only as its length.
 - Never use remote debugging (`--remote-debugging-port`, `--cdp 9222`, `--auto-connect`), Playwright attached to
@@ -66,6 +67,27 @@ Rules:
 - agent-browser still works through the relay if you prefer it: `agent-browser --cdp "$(chrome-relay url
   you@company.com)" open <url>` on the first command (the URL carries this Mac's secret: never print it into logs,
   PRs, chats or files), then plain `agent-browser ...`. Don't mix the two in one task.
+
+## Downloading files (statements, invoices, exports)
+
+Files a page hands over come to you, never to Chrome's Downloads: a download link, a PDF, an export the page's
+script builds, and a popup that turns into a file (a bank's blank popup that gets a signed link from its API).
+Click with `--download` and say where they go:
+
+```bash
+chrome-relay click "March statement" --download --into ~/dev/finance/wealthsimple   # waits for it (--timeout 30)
+chrome-relay downloads [--into <dir>] [--wait 30]   # every file this session got; --into moves them there
+chrome-relay open https://example.com/report.pdf --into .                            # an address that is a file
+chrome-relay save - --into <dir> < links.txt   # addresses loaded with the tab's cookies, one "<url> [name]" a line
+```
+
+- Every action lists the files it brought (`↓ saved …`). Without `--into` they wait in the session's folder,
+  which is deleted when the session ends: move them before `close --all`.
+- Many documents: click each one with `--download`, or collect their links in the page (`eval`) and pipe them
+  into `save -`. Don't build login tokens from cookies or fetch files with a script outside the browser, and
+  don't write signed links to files: they're secrets until they expire (`save` never prints their query).
+- `↓ blocked …`: the page started a file on its own, not within a minute of your own click: click what makes it.
+  No file came? `chrome-relay tabs` shows a popup still open; `chrome-relay errors` says what the page threw.
 
 ## Whole goals in one command: `chrome-relay do`
 

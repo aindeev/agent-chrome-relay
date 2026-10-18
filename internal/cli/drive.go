@@ -1,13 +1,17 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -24,6 +28,11 @@ const driveUsage = `Drive a background tab of your Chrome, one step at a time (f
   chrome-relay snapshot [--text] [--json]               the page's controls, each with a ref like @e5
   chrome-relay click <target> [--snapshot]              <target>: @e5, the control's label ("Save", button:Save),
                                                         or a CSS selector (#save, css:main button)
+  chrome-relay click <target> --download [--into <dir>] [--timeout <s>]   and wait for the file it brings (a download,
+                                                        a PDF, a popup that turns into one); saved into <dir> (default .)
+  chrome-relay downloads [--into <dir>] [--wait <s>]    the files your pages handed over; --into moves them there
+  chrome-relay save <url>... | save - [--into <dir>] [--name <file>]   load addresses as your tab would (its cookies)
+                                                        and save them as files; "-": one "<url> [name]" a line on stdin
   chrome-relay fill <target> <text>                     replace a field's text (text may be op://vault/item/field)
   chrome-relay select <target> <option>                 choose a dropdown option
   chrome-relay type <target> <text>   add to a field       chrome-relay check | uncheck <target>
@@ -44,7 +53,9 @@ const driveUsage = `Drive a background tab of your Chrome, one step at a time (f
   chrome-relay tabs               chrome-relay tab <id>            chrome-relay close [--all]
 
 Every action checks the control first (still there, enabled, on screen, not covered), waits for the page to settle and
-says what changed. Refs last until the page navigates. One session per agent; name several with CHROME_RELAY_SESSION.`
+says what changed. Refs last until the page navigates. One session per agent; name several with CHROME_RELAY_SESSION.
+Files a page hands over are saved by Chrome Relay, never by Chrome (no Downloads bubble, no PDF viewer): each action
+lists the ones it brought. They are kept until the session ends: move them with --into.`
 
 // flags pulls --name [value] options out of args: bools are flags without a value.
 func flags(args []string, bools ...string) (rest []string, opt map[string]string) {
@@ -224,7 +235,7 @@ func (c *cli) printPage(p decide.Page, text bool) {
 
 // drive is every step-by-step command: open, snapshot, click, fill, ... (see driveUsage).
 func (c *cli) drive(cmd string) error {
-	rest, opt := flags(c.args[2:], "new", "all", "full", "text", "json", "snapshot", "clear", "values")
+	rest, opt := flags(c.args[2:], "new", "all", "full", "text", "json", "snapshot", "clear", "values", "download")
 	arg := func(i int) string {
 		if i < len(rest) {
 			return rest[i]
@@ -283,6 +294,9 @@ func (c *cli) drive(cmd string) error {
 			body[k] = v
 		}
 		body["tab"], body["kind"], body["brief"] = d.tab, kind, opt["snapshot"] == ""
+		if opt["download"] != "" {
+			body["download"], body["wait"] = true, seconds(opt["timeout"], 30)
+		}
 		if to, ok := body["dropOn"].(string); ok { // drag: the second element
 			delete(body, "dropOn")
 			w2, shown2, err := where(page, to, "")
@@ -324,6 +338,12 @@ func (c *cli) drive(cmd string) error {
 		default:
 			c.printf(" (no change on the page yet)\n")
 		}
+		if err := c.printFiles(res.Downloads, into(opt)); err != nil {
+			return err
+		}
+		if opt["download"] != "" && len(res.Downloads) == 0 {
+			return fmt.Errorf("no file came within %.0fs of the %s (`chrome-relay downloads --wait 30` waits longer; `chrome-relay tabs` shows a popup it opened)", seconds(opt["timeout"], 30), kind)
+		}
 		if opt["snapshot"] != "" {
 			c.printPage(res.Page, false)
 		}
@@ -335,6 +355,9 @@ func (c *cli) drive(cmd string) error {
 			return err
 		}
 		c.printf("✓ %s %s→ %s · %s\n", kind, text+map[bool]string{true: " ", false: ""}[text != ""], res.Page.Title, res.Page.URL)
+		if err := c.printFiles(res.Downloads, into(opt)); err != nil {
+			return err
+		}
 		if opt["snapshot"] != "" {
 			c.printPage(res.Page, false)
 		}
@@ -350,13 +373,17 @@ func (c *cli) drive(cmd string) error {
 			u = "https://" + u
 		}
 		var res struct {
-			Profile string      `json:"profile"`
-			Page    decide.Page `json:"page"`
+			Profile   string      `json:"profile"`
+			Page      decide.Page `json:"page"`
+			Downloads []savedFile `json:"downloads"`
 		}
 		if err := d.call("open", map[string]any{"text": u, "profile": opt["profile"], "new": opt["new"] != ""}, &res); err != nil {
 			return err
 		}
 		c.printf("✓ %s · %s\n", res.Page.Title, res.Page.URL)
+		if err := c.printFiles(res.Downloads, into(opt)); err != nil {
+			return err
+		}
 		if opt["snapshot"] != "" {
 			c.printPage(res.Page, false)
 		}
@@ -719,6 +746,57 @@ func (c *cli) drive(cmd string) error {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
+	case "downloads":
+		var res struct {
+			Downloads []savedFile `json:"downloads"`
+		}
+		if err := d.call("downloads", map[string]any{"wait": seconds(opt["wait"], 0)}, &res); err != nil {
+			return err
+		}
+		if len(res.Downloads) == 0 {
+			c.println("no files yet in this session")
+			return nil
+		}
+		return c.printFiles(res.Downloads, opt["into"])
+	case "save":
+		type job struct{ url, name string }
+		var jobs []job
+		if arg(0) == "-" {
+			sc := bufio.NewScanner(c.stdin())
+			sc.Buffer(make([]byte, 64<<10), 1<<20)
+			for sc.Scan() {
+				if f := strings.Fields(sc.Text()); len(f) > 0 && !strings.HasPrefix(f[0], "#") {
+					jobs = append(jobs, job{f[0], strings.Join(f[1:], " ")})
+				}
+			}
+			if err := sc.Err(); err != nil {
+				return err
+			}
+		} else {
+			for _, u := range rest {
+				jobs = append(jobs, job{u, opt["name"]})
+			}
+		}
+		if len(jobs) == 0 {
+			return errors.New("usage: chrome-relay save <url>... [--into <dir>] [--name <file>]   or   save - < list   (one \"<url> [name]\" a line)")
+		}
+		dir, failed := cmpOr(opt["into"], "."), 0
+		for _, j := range jobs {
+			var res struct {
+				Download savedFile `json:"download"`
+			}
+			if err := d.call("save", map[string]any{"tab": d.tab, "text": j.url, "name": j.name}, &res); err != nil {
+				failed++
+				c.printf("✗ %s: %s\n", cleanAddress(j.url), err.Error())
+				continue
+			}
+			if err := c.printFiles([]savedFile{res.Download}, dir); err != nil {
+				return err
+			}
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d of %d not saved", failed, len(jobs))
+		}
 	case "tabs":
 		var res struct {
 			Profile string `json:"profile"`
@@ -763,3 +841,134 @@ func (c *cli) drive(cmd string) error {
 }
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// savedFile: a file the relay saved for this session (a download, a PDF, a file the page made).
+type savedFile struct {
+	ID           int
+	Name, Path   string
+	Size         int64
+	Type, From   string
+	State, Error string
+}
+
+// into: where the files an action brings go: --into, or with --download the current folder; "" leaves them in the
+// session's own folder.
+func into(opt map[string]string) string {
+	if opt["into"] == "" && opt["download"] != "" {
+		return "."
+	}
+	return opt["into"]
+}
+
+// seconds: a --timeout or --wait value, else def.
+func seconds(v string, def float64) float64 {
+	if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
+		return f
+	}
+	return def
+}
+
+// printFiles says what became of each file, and moves the saved ones into dir (when given).
+func (c *cli) printFiles(files []savedFile, dir string) error {
+	for _, f := range files {
+		switch f.State {
+		case "saved":
+			where := f.Path
+			if dir != "" {
+				if !fileExists(f.Path) { // moved already
+					c.printf("↓ %s (moved already)\n", f.Name)
+					continue
+				}
+				dst, err := moveInto(f.Path, dir)
+				if err != nil {
+					return fmt.Errorf("could not move %s into %s: %w", f.Name, dir, err)
+				}
+				where = dst
+			}
+			c.printf("↓ saved %s (%s%s) → %s\n", f.Name, sizeText(f.Size), map[bool]string{true: ", " + f.Type}[f.Type != ""], where)
+			if dir == "" {
+				c.println("  kept until this session ends: `chrome-relay downloads --into <dir>` moves it")
+			}
+		case "saving":
+			c.printf("↓ still saving %s (%s so far): `chrome-relay downloads --wait 60`\n", f.Name, sizeText(f.Size))
+		case "blocked":
+			c.printf("↓ blocked %s from %s: %s\n", f.Name, f.From, f.Error)
+		default:
+			c.printf("↓ %s from %s failed: %s\n", f.Name, f.From, f.Error)
+		}
+	}
+	return nil
+}
+
+func sizeText(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%d KB", n/(1<<10))
+	}
+	return fmt.Sprintf("%d bytes", n)
+}
+
+// moveInto moves a file into dir under its own name, or "name (1)", ...: never over a file that's there.
+func moveInto(src, dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	base := filepath.Base(src)
+	ext := filepath.Ext(base)
+	for i := 0; i < 1000; i++ {
+		n := base
+		if i > 0 {
+			n = fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(base, ext), i, ext)
+		}
+		dst := filepath.Join(dir, n)
+		err := os.Link(src, dst) // fails if dst exists: nothing is overwritten
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil { // another volume: copy it
+			if err = copyNew(src, dst); errors.Is(err, fs.ErrExist) {
+				continue
+			}
+		}
+		if err != nil {
+			return "", err
+		}
+		os.Remove(src)
+		if abs, err := filepath.Abs(dst); err == nil {
+			dst = abs
+		}
+		return dst, nil
+	}
+	return "", errors.New("too many files with that name")
+}
+
+func copyNew(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err = io.Copy(out, in); err == nil {
+		err = out.Close()
+	} else {
+		out.Close()
+	}
+	if err != nil {
+		os.Remove(dst)
+	}
+	return err
+}
+
+// cleanAddress: an address without its query string (signed links carry their secret there).
+func cleanAddress(u string) string {
+	if x, err := url.Parse(u); err == nil && x.Host != "" {
+		return x.Scheme + "://" + x.Host + x.EscapedPath()
+	}
+	return cut(u, 80)
+}

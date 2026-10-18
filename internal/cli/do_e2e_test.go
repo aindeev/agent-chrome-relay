@@ -432,7 +432,7 @@ func (e *e2e) do(models []decide.Model, args ...string) (string, int) {
 func (e *e2e) run(args ...string) (string, int) {
 	var out bytes.Buffer
 	c := &cli{instance: instance{Name: "chrome-relay", Home: e.home, Port: e.port}, args: append([]string{"chrome-relay"}, args...),
-		out: &out, errw: &out, models: func(string) ([]decide.Model, []string) { return nil, []string{"none"} }}
+		out: &out, errw: &out, in: e2eStdin, models: func(string) ([]decide.Model, []string) { return nil, []string{"none"} }}
 	code := 0
 	if err := c.run(); err != nil {
 		code = 1

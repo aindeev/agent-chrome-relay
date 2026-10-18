@@ -159,6 +159,7 @@ func New(o Options) (*Server, error) {
 	// Chrome Relay's files are private to this user: which accounts and sites are used, and the audit trail.
 	os.Chmod(o.Home, 0o700)
 	os.MkdirAll(filepath.Join(o.Home, "audit"), 0o700)
+	os.RemoveAll(filepath.Join(o.Home, "downloads")) // files of sessions a previous relay held: their tabs are gone too
 	os.Chmod(filepath.Join(o.Home, "audit"), 0o700)
 	for _, f := range []string{"config.json", "identities.json", "relay.log", "relay.out"} {
 		os.Chmod(filepath.Join(o.Home, f), 0o600)

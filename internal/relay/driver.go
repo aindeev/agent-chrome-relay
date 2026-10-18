@@ -54,12 +54,14 @@ type driveReq struct {
 	Limit    int             `json:"limit"`    // observe: how many controls at most (default 300)
 	To       int             `json:"to"`       // act drag: the node to drop on
 	ToSel    string          `json:"toSelector"`
-	What     string          `json:"what"`   // query: html, attr, count, visible, enabled, checked
-	Name     string          `json:"name"`   // query attr: which attribute; cdp: the method
-	Params   json.RawMessage `json:"params"` // cdp
-	Clear    bool            `json:"clear"`  // console: forget what was shown
-	Brief    bool            `json:"brief"`  // act: the page's address and title afterwards, not a whole snapshot
-	ByRef    bool            `json:"byRef"`  // act: Node is a ref the agent took from a snapshot: it must still name what it did
+	What     string          `json:"what"`     // query: html, attr, count, visible, enabled, checked
+	Name     string          `json:"name"`     // query attr: which attribute; cdp: the method; save: the file's name
+	Params   json.RawMessage `json:"params"`   // cdp
+	Clear    bool            `json:"clear"`    // console: forget what was shown
+	Brief    bool            `json:"brief"`    // act: the page's address and title afterwards, not a whole snapshot
+	ByRef    bool            `json:"byRef"`    // act: Node is a ref the agent took from a snapshot: it must still name what it did
+	Download bool            `json:"download"` // act: wait for the file the action brings (and downloads: for one to come)
+	Wait     float64         `json:"wait"`     // act with download, downloads: how long, in seconds
 }
 
 type driveExpect struct {
@@ -241,6 +243,7 @@ func (s *Server) serveDriver(w http.ResponseWriter, r *http.Request) {
 	}
 	a.last = time.Now()
 	if r.URL.Path == "/driver/open" {
+		since := a.dlSeq
 		out, err := a.open(q)
 		if err != nil {
 			if a.held && len(a.tabs) == 0 {
@@ -249,7 +252,15 @@ func (s *Server) serveDriver(w http.ResponseWriter, r *http.Request) {
 			js(http.StatusOK, map[string]any{"error": err.Error()})
 			return
 		}
+		if dl := a.downloadsSince(since, false, 30*time.Second); len(dl) > 0 { // the address was a file
+			out["downloads"] = dl
+		}
 		js(http.StatusOK, out)
+		return
+	}
+	if r.URL.Path == "/driver/downloads" {
+		wait := time.Duration(q.Wait * float64(time.Second))
+		js(http.StatusOK, map[string]any{"downloads": a.downloadsSince(0, wait > 0, wait), "folder": a.dlDir()})
 		return
 	}
 	if r.URL.Path == "/driver/tabs" {
@@ -309,7 +320,23 @@ func (s *Server) serveDriver(w http.ResponseWriter, r *http.Request) {
 			out = map[string]any{"result": raw}
 		}
 	case "/driver/act":
-		out, err = a.act(t, q)
+		since := a.dlSeq
+		if out, err = a.act(t, q); err == nil {
+			// a file the action brought (a download, a popup that turned into one): what has come so far, or with
+			// --download, until it has
+			wait := 10 * time.Second
+			if q.Download {
+				wait = time.Duration(cmp.Or(q.Wait, 30) * float64(time.Second))
+			}
+			if dl := a.downloadsSince(since, q.Download, wait); len(dl) > 0 || q.Download {
+				out["downloads"] = dl
+			}
+		}
+	case "/driver/save":
+		var d download
+		if d, err = a.saveURL(t, q.Text, q.Name); err == nil {
+			out = map[string]any{"download": d}
+		}
 	case "/driver/check":
 		out, err = a.check(t, q.Checks)
 	case "/driver/close":
@@ -707,11 +734,11 @@ func (a *Agent) screenshot(t int, full bool) (map[string]any, error) {
 }
 
 // waitNewDocument: until the tab shows another document than the one with this key (address|timeOrigin), and it
-// has loaded; false if none came within d. Must hold s.mu.
-func (a *Agent) waitNewDocument(t int, key string, d time.Duration) bool {
+// has loaded; false if none came within d, or the navigation turned out to be a file after since. Must hold s.mu.
+func (a *Agent) waitNewDocument(t int, key string, d time.Duration, since time.Time) bool {
 	_, origin, _ := strings.Cut(key, "|")
 	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
+	for time.Now().Before(deadline) && !a.fileAt[t].After(since) { // a file instead of a page: none is coming
 		var now string
 		if err := a.eval(t, "String(performance.timeOrigin)", false, &now); errors.Is(err, errNavigated) || (err == nil && now != origin) {
 			a.waitLoad(t)
@@ -965,10 +992,12 @@ var keyCodes = map[string]int{"Enter": 13, "Tab": 9, "Escape": 27, "ArrowDown": 
 func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 	inFrame := "" // the session of another site's frame the control is in, if it is
 	urlBefore := a.urls[t]
+	start := time.Now()
 	out := map[string]any{}
 	delete(a.dialogSeen, t)
 	switch q.Kind {
 	case "navigate":
+		a.lastInput[t] = time.Now() // the agent's own open: a file at that address is the agent's to save
 		if err := a.input(t, "Page.navigate", map[string]any{"url": q.Text}); err != nil {
 			return nil, err
 		}
@@ -1209,15 +1238,17 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 			navigated = true
 			a.waitLoad(t)
 		case after.Navigating: // the page started to leave: until the next one is there (a cancelled one never comes)
-			navigated = true
-			if !a.waitNewDocument(t, fmt.Sprint(after.Page["key"]), 5*time.Second) {
+			if a.waitNewDocument(t, fmt.Sprint(after.Page["key"]), 5*time.Second, start) {
+				navigated = true
+			} else if !a.fileAt[t].After(start) { // (a file: the page stays)
+				navigated = true
 				a.unsettled[t] = unsettled{from: strings.Split(fmt.Sprint(after.Page["url"]), "#")[0], until: time.Now().Add(10 * time.Second)}
 			}
 		case err != nil:
 			return nil, err
 		default:
 			if inFrame == "" { // (in a frame: its own document; the page's comes below)
-				if after.Busy || after.Leaving != "" { // a page that isn't changing needs no wait before the next step
+				if (after.Busy || after.Leaving != "") && !a.fileAt[t].After(start) { // a page that isn't changing needs no wait before the next step
 					a.unsettled[t] = unsettled{from: after.Leaving, until: time.Now().Add(5 * time.Second)}
 				}
 				snap = after.Page

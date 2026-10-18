@@ -143,9 +143,17 @@ type cli struct {
 	version string
 	out     io.Writer
 	errw    io.Writer
+	in      io.Reader                                               // tests: stdin
 	op      func(args ...string) (stdout, stderr []byte, err error) // tests: the 1Password CLI
 	opAccts func() []opAccount                                      // tests: its accounts
 	models  func(choice string) ([]decide.Model, []string)          // tests: the deciders `do` asks
+}
+
+func (c *cli) stdin() io.Reader {
+	if c.in != nil {
+		return c.in
+	}
+	return os.Stdin
 }
 
 // Main runs every command but serve; returns the exit code.
@@ -189,7 +197,7 @@ func (c *cli) run() error {
 	case "do":
 		return c.do()
 	case "open", "snapshot", "click", "dblclick", "fill", "type", "select", "check", "uncheck", "hover", "upload", "dialog", "drag", "console", "errors", "cookies", "pdf", "cdp", "is", "press", "scroll", "back", "reload", "get", "eval",
-		"screenshot", "wait", "tabs", "tab", "close":
+		"screenshot", "wait", "tabs", "tab", "close", "downloads", "save":
 		return c.drive(cmd)
 	case "decider":
 		return c.decider()

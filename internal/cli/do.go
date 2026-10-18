@@ -186,6 +186,7 @@ type actResult struct {
 	Refused   string      `json:"refused"`
 	Navigated bool        `json:"navigated"`
 	Dialogs   []string    `json:"dialogs"`
+	Downloads []savedFile `json:"downloads"` // files the action brought, saved by the relay
 	Page      decide.Page `json:"page"`
 	Element   struct {
 		Role  string `json:"role"`
