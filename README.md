@@ -192,6 +192,8 @@ chrome-relay fill <target> <text>                     # replace a field's text; 
 chrome-relay type | select | check | uncheck | upload | drag | press | scroll | back | reload
 chrome-relay get text|value|html|attr|count|url|title  # and: is visible|enabled|checked, eval, wait, screenshot, pdf
 chrome-relay console | errors | cookies | dialog accept|dismiss | tabs | tab <id> | cdp <Domain.method>
+chrome-relay click <target> --download [--into <dir>]  # and wait for the file it brings
+chrome-relay downloads [--into <dir>] | save <url>... [--into <dir>]   # files; addresses loaded as the tab would
 chrome-relay close [--all]
 ```
 
@@ -206,6 +208,12 @@ chrome-relay close [--all]
 - **What it reads.** Snapshots see into open shadow roots, same-site frames and other sites' frames (a payment
   provider's card fields show as `in-frame (js.stripe.com)`), and list clickable elements without a role (a
   `<div>` with a click handler), file fields behind styled buttons, and radios hidden behind their labels.
+- **Files come to the agent, not to Chrome.** A download, a PDF the page would show in Chrome's viewer, a file the
+  page's script makes (a `blob:` export) and a popup that turns into a file (a blank popup the page sends to a
+  signed link, as banks do) are saved by the relay, with no Downloads bubble and no viewer. Each action lists
+  the files it brought; `--download` waits for them and `--into` puts them where you want. `save` loads
+  addresses with the tab's cookies, so a list of links the page gave you becomes files without a script outside
+  the browser.
 
 Compared with [agent-browser](https://github.com/vercel-labs/agent-browser) through the same relay, on 23 test
 pages that report whether the action really happened (`CHROME_RELAY_E2E=1 CHROME_RELAY_COMPARE=1 go test
@@ -222,8 +230,8 @@ a local page, four runs):
 | read the page's text | 12–17 ms | 13–18 ms |
 
 The few milliseconds on fill and click are the check before the action and the read of what changed. What
-agent-browser has that these commands don't: recording network traffic, traces and video, page diffs and
-downloads. To use it instead: `agent-browser --cdp "$(chrome-relay url you@company.com)" open <url>` (the URL
+agent-browser has that these commands don't: recording network traffic, traces and video, and page diffs. To use
+it instead: `agent-browser --cdp "$(chrome-relay url you@company.com)" open <url>` (the URL
 carries this Mac's secret: keep it out of logs and chats), then `agent-browser ...` as usual.
 
 ## Who can drive it
@@ -450,6 +458,15 @@ blocked pages. Typed text is stored only as a character count, and URLs lose the
 - **Self-cleaning**: tabs of an agent silent for 30 minutes are closed. When the relay restarts, the extension
   closes the agent tabs it opened (tracked by tab id, so your own tab groups are never touched).
 - **Real input in background tabs**: focus emulation is on in every agent tab, so clicks and typing land.
+- **Files** (tabs of `chrome-relay open` sessions; agent-browser connections keep Chrome's own downloads): the relay
+  looks at each page's response headers (DevTools `Fetch`, which is therefore not available to `cdp` there).
+  An attachment, or in the tab's own frame a type Chrome wouldn't show as a page (PDF, CSV, zip, ...), is
+  streamed into `~/.chrome-relay/downloads/<session>/` and its navigation cancelled, so the page stays where it
+  was and a popup opened only for the file closes, as Chrome does with downloads. Same-site `<a download>` links
+  and `blob:`/`data:` files are read in the page. Only within a minute of the agent's own click, key or open: a
+  file a page starts on its own is refused. Names come from the site, cleaned (no paths, hidden files or
+  right-to-left tricks), never overwrite, and get macOS's quarantine flag. Files are deleted when the session
+  ends; the audit trail records each one (name, size, address without its query).
 
 ## Development
 

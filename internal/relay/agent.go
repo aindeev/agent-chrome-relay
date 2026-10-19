@@ -133,6 +133,10 @@ type Agent struct {
 	shown                map[int]map[int]map[string]string // tab -> ref -> the role and label it named in a snapshot
 	shownDoc             map[int]string                    // tab -> the document those refs belong to
 	refNext              int                               // the next ref number the driver's snapshots hand out (never reused)
+	downloads            []*download                       // files saved for a held session (files.go)
+	dlSeq                int                               // the last download's id
+	pageFiles            map[string]*pageFile              // "tab:id" -> a file the page script is handing over
+	fileAt               map[int]time.Time                 // tab -> when its page's navigation last turned out to be a file (and was cancelled)
 }
 
 // newLogin: a password Chrome Relay just made and saved, for the next fields of the same sign-up.
@@ -144,7 +148,7 @@ type newLogin struct {
 func (a *Agent) init() {
 	a.tabs, a.child, a.setup, a.paused = map[int]bool{}, map[string]int{}, map[int][]step{}, map[int]*pause{}
 	a.lastInput, a.contexts, a.handoffs, a.filled = map[int]time.Time{}, map[int]map[int]ctxInfo{}, map[int]handoff{}, map[int]string{}
-	a.newLogins = map[string]newLogin{}
+	a.newLogins, a.pageFiles, a.fileAt = map[string]newLogin{}, map[string]*pageFile{}, map[int]time.Time{}
 	a.worlds, a.unsettled, a.shown, a.shownDoc = map[frameKey]int{}, map[int]unsettled{}, map[int]map[int]map[string]string{}, map[int]string{}
 	a.frames, a.nodeFrame, a.cardFilled = map[string]childFrame{}, map[int]map[int]string{}, map[int]bool{}
 	a.targetURLs, a.urls, a.mainFrames, a.popups, a.openerOf = map[int]string{}, map[int]string{}, map[int]string{}, map[string]int{}, map[int][2]int{}
@@ -332,6 +336,10 @@ func (a *Agent) onMessage(m message) {
 		}
 		if child == "" && m.Method == "Runtime.runIfWaitingForDebugger" {
 			a.ok(m, nil)
+			return
+		}
+		if a.held && strings.HasPrefix(m.Method, "Fetch.") {
+			a.err(m, "Chrome Relay uses Fetch in your tabs to save the files pages hand over (`chrome-relay downloads`): it isn't available to `cdp` here")
 			return
 		}
 		// a picture of a checkout with a card filled in shows its number and code: masking can't reach pixels
@@ -539,6 +547,9 @@ func (a *Agent) prepare(t int, openerID *int) error {
 	if openerID != nil {
 		opener = fmt.Sprintf("window.__agentBridgeOpenerId=%d;", *openerID)
 	}
+	if a.held { // the relay saves the files its pages hand over (files.go)
+		opener += "window.__agentBridgeFiles=1;"
+	}
 	pageScript := strings.TrimSuffix(quietShim, "\n")
 	if a.s.passkeySettings().enabled { // else pages' own WebAuthn is left alone
 		pageScript = strings.TrimSuffix(passkeyShim, "\n") + pageScript
@@ -547,6 +558,9 @@ func (a *Agent) prepare(t int, openerID *int) error {
 		{"Runtime.addBinding", map[string]any{"name": binding}},
 		{"Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": opener + strings.TrimSuffix(popupShim, "\n"), "runImmediately": true}},
 		{"Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": pageScript, "runImmediately": true}}}
+	if a.held {
+		steps = append(steps, step{"Fetch.enable", fetchPatterns})
+	}
 	chans := make([]chan extReply, len(steps)) // all at once, like Promise.all
 	for i, st := range steps {
 		chans[i] = a.s.extSend(p, map[string]any{"op": "cdp", "tabId": t, "method": st.Method, "params": st.Params})
@@ -604,6 +618,12 @@ func (a *Agent) onPageCall(t int, raw string, from callFrom) {
 	op, _ := c["op"].(string)
 	if op == "webauthn" { // may wait on 1Password and Touch ID: don't hold up popups
 		a.s.locked(func() { a.onWebAuthn(t, id, c, from) })
+		return
+	}
+	if op == "file" {
+		if a.held {
+			a.onPageFile(t, id, c)
+		}
 		return
 	}
 	u, _ := c["url"].(string)
@@ -805,6 +825,11 @@ func (a *Agent) onExtEvent(e extEvent) bool {
 	var P map[string]any
 	json.Unmarshal(e.Params, &P)
 	switch e.Method {
+	case "Fetch.requestPaused":
+		if e.SessionID == "" && a.held {
+			a.onResponse(e.TabID, e.Params)
+			return true
+		}
 	case "Runtime.consoleAPICalled", "Runtime.exceptionThrown":
 		if a.held {
 			a.logConsole(e.TabID, e.Method, e.Params)
@@ -1010,6 +1035,7 @@ func (a *Agent) onDetached(t int, d detach) bool {
 	}
 	delete(a.contexts, t)
 	delete(a.lastInput, t)
+	delete(a.fileAt, t)
 	delete(a.handoffs, t)
 	delete(a.filled, t)
 	a.popupGone(t)
@@ -1027,4 +1053,12 @@ func (a *Agent) close() {
 	}
 	a.tabs, a.order = map[int]bool{}, nil
 	close(a.pageQ)
+	for _, pf := range a.pageFiles {
+		if pf != nil {
+			pf.f.Close()
+		}
+	}
+	if a.dlSeq > 0 { // the session's files go with it: the agent moved what it wanted (`chrome-relay downloads --into`)
+		go os.RemoveAll(a.dlDir())
+	}
 }
