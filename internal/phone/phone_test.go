@@ -144,12 +144,32 @@ func TestPairAndApprove(t *testing.T) {
 	}
 	done := make(chan Request, 1)
 	go func() { done <- ph.answer(t, true, false) }()
-	err := p.Approve(context.Background(), tr, nil, "Test Mac", Details{Reason: `let Claude Code (repo) fill the password of "Twilio" on www.twilio.com`}, time.Minute)
+	err := p.Approve(context.Background(), tr, nil, "Test Mac", Details{Reason: `let Claude Code (repo) fill the password of "Twilio" on www.twilio.com`,
+		Why: "Download March's invoice for the books", FromAgent: true}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := <-done; !strings.Contains(r.Reason, "Twilio") || r.Mac != "Test Mac" || !r.Expires.After(r.Created) {
+	if r := <-done; !strings.Contains(r.Reason, "Twilio") || r.Mac != "Test Mac" || !r.Expires.After(r.Created) ||
+		r.Why != "Download March's invoice for the books" || r.NoWhy {
 		t.Fatalf("phone saw %+v", r)
+	}
+}
+
+// The agent's why, in its own words: Touch ID quotes it, and says so when an agent gave none.
+func TestPromptQuotesWhy(t *testing.T) {
+	d := Details{Reason: `let Claude Code (repo) sign in to www.twilio.com with "Twilio"`, FromAgent: true}
+	if got := d.Prompt(); got != `let Claude Code (repo) sign in to www.twilio.com with "Twilio". It didn't say why` {
+		t.Error(got)
+	}
+	d.Why = ShortWhy("  Download March's\ninvoice  for the books ")
+	if got := d.Prompt(); got != `let Claude Code (repo) sign in to www.twilio.com with "Twilio". It says why: “Download March's invoice for the books”` {
+		t.Error(got)
+	}
+	if got := (Details{Reason: "pair an iPhone"}).Prompt(); got != "pair an iPhone" { // the person's own: no why
+		t.Error(got)
+	}
+	if got := []rune(ShortWhy(strings.Repeat("a", 300))); len(got) != 160 || got[159] != '…' {
+		t.Error(len(got))
 	}
 }
 

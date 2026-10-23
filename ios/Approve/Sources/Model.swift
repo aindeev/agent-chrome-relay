@@ -26,6 +26,8 @@ struct Pending: Identifiable, Hashable {
   let agent: String? // "Claude Code (my-repo)"; older Macs send only the reason
   let site: String?  // "www.twilio.com"
   let what: String?  // "password", "one-time code", "passkey as bot@acme.com"
+  var why: String? = nil // the agent's own sentence on why it needs this: "Download March's invoice for the books"
+  var noWhy = false      // an agent asks and gave no reason (older Macs send neither)
   let created: Date
   let expires: Date
   let plain: Data
@@ -189,6 +191,7 @@ final class Store: ObservableObject {
                 let expires = (r["expires"] as? String).flatMap(Self.date), expires > Date() else { continue }
           found.append(Pending(id: id, mac: mac, macName: r["mac"] as? String ?? mac.name, reason: r["reason"] as? String ?? "",
                                agent: Self.text(r["agent"]), site: Self.text(r["site"]), what: Self.text(r["what"]),
+                               why: Self.text(r["why"]), noWhy: r["noWhy"] as? Bool ?? false,
                                created: (r["created"] as? String).flatMap(Self.date) ?? Date(), expires: expires, plain: plain))
         }
       } catch {

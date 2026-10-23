@@ -105,7 +105,7 @@ func (p MacPerson) Unlock(key, reason string) (Token, error) {
 func (p MacPerson) Approve(d phone.Details) error {
 	ph, err := phone.Load(p.Instance)
 	if err != nil || ph == nil {
-		return macos.Authenticate(d.Reason)
+		return macos.Authenticate(d.Prompt())
 	}
 	return phone.Either(p.Instance, ph, d, 2*time.Minute)
 }

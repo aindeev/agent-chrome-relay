@@ -18,7 +18,27 @@ import (
 
 func vaultRef(text string) bool { return vault.Ref.MatchString(text) }
 
-func (a *Agent) who() vault.Who { return vault.Who{Name: describe(a.app, a.cwd), Session: a.sid} }
+func (a *Agent) who() vault.Who {
+	return vault.Who{Name: describe(a.app, a.cwd), Session: a.sid, Why: a.currentWhy()}
+}
+
+// whyFor: how long an agent's why stands for the approvals that follow it (a sign-in fills two or three fields,
+// a passkey asks after the click that started it). An older one would explain some other task.
+const whyFor = 10 * time.Minute
+
+// said records the agent's why, as prompts quote it.
+func (a *Agent) said(why string) {
+	if why = phone.ShortWhy(why); why != "" {
+		a.why, a.whyAt = why, time.Now()
+	}
+}
+
+func (a *Agent) currentWhy() string {
+	if time.Since(a.whyAt) > whyFor {
+		return ""
+	}
+	return a.why
+}
 
 // fillSecret: `chrome-relay fill @e3 "op://Agents/GitHub/password"` types the real value from the shared vault.
 // The agent never gets it back: the vault (and the person's Touch ID) decides, the page's site must be the
@@ -38,8 +58,9 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 		return
 	}
 	// 1Password and the person's Touch ID take a moment: don't hold the relay meanwhile
+	who, target := a.who(), a.targetURLOf(t)
 	a.s.mu.Unlock()
-	card := a.s.vault.IsCard(context.Background(), ref, a.targetURLOf(t), a.who())
+	card := a.s.vault.IsCard(context.Background(), ref, target, who)
 	a.s.mu.Lock()
 	// what can be refused without 1Password is refused before the person is asked
 	if card {
@@ -51,8 +72,9 @@ func (a *Agent) fillSecret(t int, child string, m message, ref string) {
 		refuse(errors.New("secrets are only typed into the page itself or a frame of its own origin, not into another site's frame"))
 		return
 	}
+	who, target = a.who(), a.targetURLOf(t)
 	a.s.mu.Unlock()
-	v, err := a.s.vault.Resolve(context.Background(), ref, a.targetURLOf(t), a.who())
+	v, err := a.s.vault.Resolve(context.Background(), ref, target, who)
 	a.s.mu.Lock()
 	if err != nil {
 		refuse(err)
@@ -183,8 +205,9 @@ func (a *Agent) saveSecret(t int, child string, m message, ref string, r vault.S
 		if nl, ok := a.newLogins[key]; ok && time.Since(nl.at) < 10*time.Minute {
 			v = nl.v // "confirm password": the same one, saved already
 		} else {
+			who, target := a.who(), a.targetURLOf(t)
 			a.s.mu.Unlock()
-			v, err = a.s.vault.NewLogin(context.Background(), r, a.targetURLOf(t), a.who())
+			v, err = a.s.vault.NewLogin(context.Background(), r, target, who)
 			a.s.mu.Lock()
 			if err == nil {
 				a.newLogins[key] = newLogin{v, time.Now()}
@@ -199,8 +222,9 @@ func (a *Agent) saveSecret(t int, child string, m message, ref string, r vault.S
 			return
 		}
 		a.hide(secret)
+		who, target := a.who(), a.targetURLOf(t)
 		a.s.mu.Unlock()
-		v, err = a.s.vault.SaveOTP(context.Background(), r, secret, a.targetURLOf(t), a.who())
+		v, err = a.s.vault.SaveOTP(context.Background(), r, secret, target, who)
 		a.s.mu.Lock()
 		if err == nil {
 			a.s.audit(a, "1password saved one-time code", "tab", t, "item", v.Item, "url", u)
@@ -342,8 +366,9 @@ func (a *Agent) onWebAuthn(t, id int, c map[string]any, from callFrom) {
 		refuse("NotAllowedError", "a page may create a passkey only right after the agent clicked or typed in it")
 		return
 	}
+	who := a.who()
 	a.s.mu.Unlock()
-	keys, err := a.s.vault.Passkeys(context.Background(), rpID, a.who())
+	keys, err := a.s.vault.Passkeys(context.Background(), rpID, who)
 	a.s.mu.Lock()
 	if err != nil {
 		handoff("shared vault unavailable: " + err.Error())
@@ -372,7 +397,7 @@ func (a *Agent) onWebAuthn(t, id int, c map[string]any, from callFrom) {
 			for _, k := range cands {
 				names = append(names, fmt.Sprintf("%q (%s)", k.Item, k.UserName))
 			}
-			refuse("NotAllowedError", fmt.Sprintf("the vault has %d passkeys for %s: %s. Fill the username first (chrome-relay fill @eN \"op://<vault>/<item>/username\") so Chrome Relay knows which account", len(cands), rpID, strings.Join(names, ", ")))
+			refuse("NotAllowedError", fmt.Sprintf("the vault has %d passkeys for %s: %s. Fill the username first (chrome-relay fill @eN \"op://<vault>/<item>/username\" --why \"...\") so Chrome Relay knows which account", len(cands), rpID, strings.Join(names, ", ")))
 			return
 		}
 		var key *passkeys.Passkey
@@ -397,6 +422,7 @@ func (a *Agent) onWebAuthn(t, id int, c map[string]any, from callFrom) {
 		if reuse > 0 {
 			reason += fmt.Sprintf(" (and use its other passkeys for the next %s without asking)", humanDuration(reuse))
 		}
+		ask := phone.Details{Reason: reason, Agent: describe(a.app, a.cwd), Site: rpID, What: "passkey as " + as, Why: a.currentWhy(), FromAgent: true}
 		origin := u.Scheme + "://" + u.Host
 		chip := scoped{a.s.chip, a.sid, reuse}
 		if handle, _ := base64.RawURLEncoding.DecodeString(key.KeyHandle); relayApproved(handle) {
@@ -406,7 +432,7 @@ func (a *Agent) onWebAuthn(t, id int, c map[string]any, from callFrom) {
 				a.s.audit(a, "passkey approval", "tab", t, "rpId", rpID, "item", key.Item, "url", a.urls[t])
 				a.s.log("passkey: asking for approval to sign in to", rpID, "in tab", t)
 				a.s.mu.Unlock()
-				err := a.s.vault.Person.Approve(phone.Details{Reason: reason, Agent: describe(a.app, a.cwd), Site: rpID, What: "passkey as " + as})
+				err := a.s.vault.Person.Approve(ask)
 				a.s.mu.Lock()
 				if err != nil {
 					refuse("NotAllowedError", err.Error(), "item", key.Item)
@@ -420,7 +446,7 @@ func (a *Agent) onWebAuthn(t, id int, c map[string]any, from callFrom) {
 			a.s.log("passkey: asking for Touch ID to sign in to", rpID, "in tab", t)
 		}
 		a.s.mu.Unlock()
-		cred, err := passkeys.Authenticate(get, *key, origin, chip, reason)
+		cred, err := passkeys.Authenticate(get, *key, origin, chip, ask.Prompt())
 		a.s.mu.Lock()
 		if err != nil {
 			name := "NotAllowedError"

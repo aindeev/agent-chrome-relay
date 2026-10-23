@@ -32,15 +32,16 @@ extension Store {
       LogEntry(time: now.addingTimeInterval(-90_000), mac: "MacBook Pro", site: "chrome-relay-push.aindeev.workers.dev", result: .paired),
     ]
     if args.contains("-demoIdle") { return }
-    func request(_ id: String, _ agent: String, _ site: String, _ what: String, age: TimeInterval) -> Pending {
+    func request(_ id: String, _ agent: String, _ site: String, _ what: String, why: String?, age: TimeInterval) -> Pending {
       Pending(id: id, mac: mac, macName: "MacBook Pro", reason: "let \(agent) fill the \(what) on \(site)",
-              agent: agent, site: site, what: what, created: now.addingTimeInterval(-age),
+              agent: agent, site: site, what: what, why: why, noWhy: why == nil, created: now.addingTimeInterval(-age),
               expires: now.addingTimeInterval(120 - age), plain: Data())
     }
-    pending = [request("demo-1", "Claude Code (my-repo)", "www.twilio.com", "password + one-time code", age: 0)]
+    pending = [request("demo-1", "Claude Code (my-repo)", "www.twilio.com", "password + one-time code",
+                       why: "Download March's invoice for the books", age: 0)]
     if args.contains("-demoQueue") {
-      pending += [request("demo-2", "Codex", "aws.amazon.com", "one-time code", age: 20),
-                  request("demo-3", "Cursor", "github.com", "password", age: 40)]
+      pending += [request("demo-2", "Codex", "aws.amazon.com", "one-time code", why: "Rotate the staging deploy keys", age: 20),
+                  request("demo-3", "Cursor", "github.com", "password", why: nil, age: 40)]
     }
   }
 

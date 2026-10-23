@@ -129,12 +129,13 @@ struct Heading: View {
 
 /// One typed line and how it looks.
 struct TxLine: Hashable {
-  enum Kind { case label, site, body }
+  enum Kind { case label, site, body, quote }
   let text: String
   let kind: Kind
   static func label(_ s: String) -> TxLine { TxLine(text: s.uppercased(), kind: .label) }
   static func site(_ s: String) -> TxLine { TxLine(text: s, kind: .site) }
   static func body(_ s: String) -> TxLine { TxLine(text: s, kind: .body) }
+  static func quote(_ s: String) -> TxLine { TxLine(text: s, kind: .quote) }
 }
 
 /// Lines that type in fast with a block caret, a light haptic tick per finished line. Each line holds its space from
@@ -196,6 +197,7 @@ private struct LineStyle: ViewModifier {
     case .label: content.label(11)
     case .site: content.mono(16).foregroundStyle(Tx.cyan).shadow(color: Tx.glow.opacity(0.6), radius: 7)
     case .body: content.mono(16).foregroundStyle(Tx.ice)
+    case .quote: content.mono(14).foregroundStyle(Tx.ice.opacity(0.8)) // the agent's words, a step below what was checked
     }
   }
 }

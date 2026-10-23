@@ -34,6 +34,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Pairing is everything the Mac keeps about its phone. It lives in Chrome Relay's own Keychain item, never in a
@@ -219,6 +220,31 @@ type Details struct {
 	Agent  string // "Claude Code (my-repo)"
 	Site   string // "www.twilio.com"
 	What   string // "password", "one-time code", "passkey as bot@acme.com"
+	// Why is the agent's own sentence on why it needs this ("Download March's invoice for the books"), "" if it gave
+	// none. FromAgent: an agent asks (not the person, at their Terminal), so a missing why is worth saying.
+	Why       string
+	FromAgent bool
+}
+
+// Prompt is the whole sentence for Touch ID ("chrome-relay is trying to <Prompt>"): the reason, then the agent's
+// why in its own words, quoted, so the person can tell what Chrome Relay checked from what the agent claims.
+func (d Details) Prompt() string {
+	switch {
+	case d.Why != "":
+		return fmt.Sprintf("%s. It says why: “%s”", d.Reason, d.Why)
+	case d.FromAgent:
+		return d.Reason + ". It didn't say why"
+	}
+	return d.Reason
+}
+
+// ShortWhy is an agent's why as prompts show it: one line, at most 160 characters.
+func ShortWhy(s string) string {
+	s = strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }), " ")
+	if r := []rune(s); len(r) > 160 {
+		s = strings.TrimSpace(string(r[:159])) + "…"
+	}
+	return s
 }
 
 // Request is what the phone shows: who asks, for what, until when.
@@ -229,6 +255,8 @@ type Request struct {
 	Agent   string    `json:"agent,omitempty"`
 	Site    string    `json:"site,omitempty"`
 	What    string    `json:"what,omitempty"`
+	Why     string    `json:"why,omitempty"`   // the agent's own sentence; the phone shows it quoted
+	NoWhy   bool      `json:"noWhy,omitempty"` // an agent asks and didn't say why
 	Created time.Time `json:"created"`
 	Expires time.Time `json:"expires"`
 }
@@ -320,7 +348,8 @@ func (p *Pairing) Approve(ctx context.Context, t Transport, push Pusher, mac str
 	id := make([]byte, 16)
 	rand.Read(id)
 	now := time.Now().UTC().Truncate(time.Second)
-	r := Request{ID: b64u.EncodeToString(id), Mac: mac, Reason: d.Reason, Agent: d.Agent, Site: d.Site, What: d.What, Created: now, Expires: now.Add(ttl)}
+	r := Request{ID: b64u.EncodeToString(id), Mac: mac, Reason: d.Reason, Agent: d.Agent, Site: d.Site, What: d.What,
+		Why: d.Why, NoWhy: d.FromAgent && d.Why == "", Created: now, Expires: now.Add(ttl)}
 	msg, plain, err := p.sealRequest(r)
 	if err != nil {
 		return err

@@ -33,7 +33,8 @@ const driveUsage = `Drive a background tab of your Chrome, one step at a time (f
   chrome-relay downloads [--into <dir>] [--wait <s>]    the files your pages handed over; --into moves them there
   chrome-relay save <url>... | save - [--into <dir>] [--name <file>]   load addresses as your tab would (its cookies)
                                                         and save them as files; "-": one "<url> [name]" a line on stdin
-  chrome-relay fill <target> <text>                     replace a field's text (text may be op://vault/item/field)
+  chrome-relay fill <target> <text>                     replace a field's text (text may be op://vault/item/field,
+                                                        with --why "<one short sentence>": the person's prompt quotes it)
   chrome-relay select <target> <option>                 choose a dropdown option
   chrome-relay type <target> <text>   add to a field       chrome-relay check | uncheck <target>
   chrome-relay hover | dblclick <target>                chrome-relay upload <target> <file>...
@@ -54,8 +55,19 @@ const driveUsage = `Drive a background tab of your Chrome, one step at a time (f
 
 Every action checks the control first (still there, enabled, on screen, not covered), waits for the page to settle and
 says what changed. Refs last until the page navigates. One session per agent; name several with CHROME_RELAY_SESSION.
+--why "<one short sentence>" on any command says why you need the account it signs in with (required with op://):
+Touch ID and the iPhone quote it, for this and the approvals of the next 10 minutes (a passkey after a click).
 Files a page hands over are saved by Chrome Relay, never by Chrome (no Downloads bubble, no PDF viewer): each action
 lists the ones it brought. They are kept until the session ends: move them with --into.`
+
+// oneSentence checks a --why: one short sentence, as Touch ID and the iPhone quote it.
+func oneSentence(why string) (string, error) {
+	why = strings.Join(strings.Fields(why), " ")
+	if n := len([]rune(why)); n > 160 {
+		return "", fmt.Errorf("--why is one short sentence (%d characters here, at most 160): the person reads it in the Touch ID prompt", n)
+	}
+	return why, nil
+}
 
 // flags pulls --name [value] options out of args: bools are flags without a value.
 func flags(args []string, bools ...string) (rest []string, opt map[string]string) {
@@ -251,6 +263,16 @@ func (c *cli) drive(cmd string) error {
 	}
 	if t, _ := strconv.Atoi(opt["tab"]); t > 0 {
 		d.tab = t
+	}
+	if d.why, err = oneSentence(opt["why"]); err != nil {
+		return err
+	}
+	// text from 1Password: the person approves it with Touch ID or on their iPhone, and the prompt quotes the why
+	needWhy := func() error {
+		if !strings.HasPrefix(strings.TrimSpace(arg(1)), "op://") || d.why != "" {
+			return nil
+		}
+		return fmt.Errorf(`say why you need this account, in one short sentence the person sees when they approve: chrome-relay %s %s %q --why "Download March's invoice for the books"`, cmd, arg(0), arg(1))
 	}
 	observe := func() (decide.Page, error) {
 		var p decide.Page
@@ -544,6 +566,9 @@ func (c *cli) drive(cmd string) error {
 		if len(rest) < 2 {
 			return errors.New("usage: chrome-relay type <target> <text>  (adds to the field; fill replaces)")
 		}
+		if err := needWhy(); err != nil {
+			return err
+		}
 		return act("type", arg(0), map[string]any{"text": arg(1)}, "fill")
 	case "dialog":
 		if arg(0) != "accept" && arg(0) != "dismiss" {
@@ -556,6 +581,9 @@ func (c *cli) drive(cmd string) error {
 	case "fill":
 		if len(rest) < 2 {
 			return errors.New("usage: chrome-relay fill <target> <text>")
+		}
+		if err := needWhy(); err != nil {
+			return err
 		}
 		return act("fill", arg(0), map[string]any{"text": arg(1)}, "fill")
 	case "select":

@@ -62,6 +62,7 @@ type driveReq struct {
 	ByRef    bool            `json:"byRef"`    // act: Node is a ref the agent took from a snapshot: it must still name what it did
 	Download bool            `json:"download"` // act: wait for the file the action brings (and downloads: for one to come)
 	Wait     float64         `json:"wait"`     // act with download, downloads: how long, in seconds
+	Why      string          `json:"why"`      // any: the agent's one sentence on why, for the approvals it leads to
 }
 
 type driveExpect struct {
@@ -242,6 +243,7 @@ func (s *Server) serveDriver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.last = time.Now()
+	a.said(q.Why)
 	if r.URL.Path == "/driver/open" {
 		since := a.dlSeq
 		out, err := a.open(q)

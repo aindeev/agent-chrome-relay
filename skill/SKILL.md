@@ -102,7 +102,8 @@ chrome-relay do "Invite the new teammate as an admin" \
 
 - **Give every value you know as `--data <field label>=<value>`**, keyed by the label the page shows ("Email",
   "Project name"); it never invents values. Credentials only as `op://` references
-  (`--data "Password=op://<vault>/<item>/password"`), never in the goal text.
+  (`--data "Password=op://<vault>/<item>/password"`), never in the goal text. The person's approval quotes the
+  goal as your reason; add `--why "<one short sentence>"` when the goal alone doesn't say why you need the account.
 - **Always give `--until`**: what the page shows when it's done (`text:...`, `url:...`, `title:...`,
   `no-text:...`, `selector:...`). Only then is "done" verified, and only then is the run saved as a flow that
   repeats it without a model next time.
@@ -129,12 +130,17 @@ chrome-relay vault
 Fill a field with a **secret reference** instead of a value. The relay types the real value into the page:
 
 ```bash
-chrome-relay fill @e2 "op://Shared with Chrome Relay/GitHub/username"
-chrome-relay fill @e3 "op://Shared with Chrome Relay/GitHub/password" # password fields only
+why="Check why last night's deploy workflow failed"
+chrome-relay fill @e2 "op://Shared with Chrome Relay/GitHub/username" --why "$why"
+chrome-relay fill @e3 "op://Shared with Chrome Relay/GitHub/password" --why "$why" # password fields only
 chrome-relay click @e4
-chrome-relay fill @e7 "op://Shared with Chrome Relay/GitHub/otp" # the current 2-step code (TOTP), computed when typed
+chrome-relay fill @e7 "op://Shared with Chrome Relay/GitHub/otp" --why "$why" # the current 2-step code (TOTP), computed when typed
 ```
 
+- **Say why, in one short sentence** (`--why`, at most 160 characters; required with a reference): the task the
+  person gave you that needs this account ("Download March's invoice for the books"), not what you're doing
+  ("Sign in to Twilio"). Touch ID and their iPhone quote it under the site and account, as your words. Keep it
+  true and plain: it's how they decide whether to approve.
 - **Pick the account deliberately.** The person may have several logins for one site (work and personal,
   several Twilio items). Choose the item whose vault, title and username match what they asked for ("my work
   account" = their work email); if that isn't clear, ask them which, and never try one after another.
@@ -173,10 +179,11 @@ When the person asks you to buy something with a card they keep in the vault (a 
 
 ```bash
 chrome-relay snapshot                     # card fields in Stripe's (or another provider's) frame show as in-frame (js.stripe.com)
-chrome-relay fill @e12 "op://Shared with Chrome Relay/Venn card/number"
-chrome-relay fill @e13 "op://Shared with Chrome Relay/Venn card/expiry"   # MM/YY; expiry-month and expiry-year for split fields
-chrome-relay fill @e14 "op://Shared with Chrome Relay/Venn card/cvc"
-chrome-relay fill @e15 "op://Shared with Chrome Relay/Venn card/name"     # if the form asks for the name on the card
+why="Renew the team's Venn plan for another year, as asked"
+chrome-relay fill @e12 "op://Shared with Chrome Relay/Venn card/number" --why "$why"
+chrome-relay fill @e13 "op://Shared with Chrome Relay/Venn card/expiry" --why "$why"  # MM/YY; expiry-month and expiry-year for split fields
+chrome-relay fill @e14 "op://Shared with Chrome Relay/Venn card/cvc" --why "$why"
+chrome-relay fill @e15 "op://Shared with Chrome Relay/Venn card/name" --why "$why"    # if the form asks for the name on the card
 ```
 
 - **The person approves every payment**: Touch ID (or their iPhone) names you, the shop and the card's last four
@@ -196,11 +203,12 @@ When the person asks you to create an account or turn on 2-step verification, Ch
 
 ```bash
 # sign-up: Chrome Relay makes a strong password, saves the login, types it
+why="Create the Acme account for the bot that files support tickets"
 chrome-relay fill @e4 "bot@acme.com"
-chrome-relay fill @e5 "op://Shared with Chrome Relay/Acme/password?new&username=bot@acme.com"
-chrome-relay fill @e6 "op://Shared with Chrome Relay/Acme/password?new&username=bot@acme.com"  # "confirm": the same one
+chrome-relay fill @e5 "op://Shared with Chrome Relay/Acme/password?new&username=bot@acme.com" --why "$why"
+chrome-relay fill @e6 "op://Shared with Chrome Relay/Acme/password?new&username=bot@acme.com" --why "$why"  # "confirm": the same one
 # 2-step verification: on the page that shows the QR code, Chrome Relay reads the key, saves it, types the code
-chrome-relay fill @e9 "op://Shared with Chrome Relay/Acme/otp?new"
+chrome-relay fill @e9 "op://Shared with Chrome Relay/Acme/otp?new" --why "$why"
 ```
 
 - **Pick the vault deliberately**: the account's (a work sign-up into the work vault), as `chrome-relay vault`
@@ -221,6 +229,8 @@ chrome-relay fill @e9 "op://Shared with Chrome Relay/Acme/otp?new"
 ## Passkeys
 
 Passkeys need no command: when a page asks for one (a "Sign in with a passkey" button), your tab answers it.
+Say why on the click that starts it (`chrome-relay click "Sign in with a passkey" --why "<one short
+sentence>"`): the approval quotes your last `--why` from the past 10 minutes, and otherwise says you gave none.
 Which way depends on what the person set up. Their passkey settings are theirs to change: never run
 `chrome-relay passkeys on|off|reuse` or `chrome-relay vault approve` yourself.
 
@@ -229,7 +239,7 @@ Which way depends on what the person set up. Their passkey settings are theirs t
   site and the account. Tell them it's coming, and wait for the page. If they turned on `chrome-relay passkeys
   reuse`, one approval covers your passkey sign-ins for a while (the prompt says how long). If they decline, the page reports it: don't retry without asking.
   If the vault has several passkeys for the site and the page doesn't say which, the request fails and names
-  them: fill the username of the one you mean first (`chrome-relay fill @eN "op://<vault>/<item>/username"`).
+  them: fill the username of the one you mean first (`chrome-relay fill @eN "op://<vault>/<item>/username" --why "..."`).
 - **Creating one** (a site's "Create a passkey" button, right after you clicked or typed in the page): the new
   passkey goes into the Secure Enclave and the vault, with no approval. Not while the Mac is locked: then the
   page is refused, and you ask the person to create it when they're back.
