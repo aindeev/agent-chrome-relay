@@ -118,7 +118,7 @@ func Either(instance string, p *Pairing, d Details, ttl time.Duration) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mac, phone := make(chan error, 1), make(chan error, 1)
-	go func() { mac <- macos.AuthenticateContext(ctx, d.Reason) }()
+	go func() { mac <- macos.AuthenticateContext(ctx, d.Prompt()) }()
 	go func() { phone <- Ask(ctx, instance, p, d, ttl) }()
 	var last error
 	for range 2 {

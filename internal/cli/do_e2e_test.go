@@ -827,10 +827,19 @@ func TestDriveVaultFill(t *testing.T) {
 	if ref == nil {
 		t.Fatal("no ref for Username")
 	}
-	out, code = run("fill", ref[1], "op://Agents/Local site/username") // by ref
+	// the person's prompt quotes why the agent needs the account: without one, nobody is asked
+	out, code = run("fill", ref[1], "op://Agents/Local site/username")
+	want(out, code, 1, "say why you need this account", `--why "`)
+	why := "Check last night's build on the local site"
+	out, code = run("fill", ref[1], "op://Agents/Local site/username", "--why", why) // by ref
 	want(out, code, 0, `✓ fill textbox "Username"`)
-	out, code = run("fill", "Password", "op://Agents/Local site/password") // by label
+	out, code = run("fill", "Password", "op://Agents/Local site/password", "--why", why) // by label
 	want(out, code, 0, `✓ fill password "Password"`)
+	e.vault.mu.Lock()
+	if len(e.vault.approvals) == 0 || !strings.HasSuffix(e.vault.approvals[0], `. It says why: “`+why+`”`) {
+		t.Errorf("the approval doesn't quote the agent's why: %q", e.vault.approvals)
+	}
+	e.vault.mu.Unlock()
 	out, code = run("get", "value", "Username") // every value the relay typed from the vault reads back masked
 	want(out, code, 0, "••••••••")
 	out, code = run("snapshot")
@@ -848,7 +857,7 @@ func TestDriveVaultFill(t *testing.T) {
 		}
 	}
 	// a secret goes only into a password field
-	out, code = run("fill", "Username", "op://Agents/Local site/password")
+	out, code = run("fill", "Username", "op://Agents/Local site/password", "--why", why)
 	want(out, code, 1, "1Password")
 	e.vault.mu.Lock()
 	n := len(e.vault.approvals)
@@ -897,20 +906,21 @@ func TestDriveCardInPaymentFrame(t *testing.T) {
 	}
 	number, expiry, cvc := ref("Card number"), ref("Expiration date MM / YY"), ref("CVC")
 	// a login never goes into a frame, and nobody is asked
-	out, code = run("fill", number, "op://Agents/Local site/password")
+	why := "Pay for the test plan"
+	out, code = run("fill", number, "op://Agents/Local site/password", "--why", why)
 	want(out, code, 1, "only typed into the page itself")
 	if n := approvals(); n != 0 {
 		t.Errorf("asked %d times for a login headed for a frame", n)
 	}
 	// the card: one approval, naming the shop and the card, covers its fields
 	for _, f := range [][2]string{{number, "number"}, {expiry, "expiry"}, {cvc, "cvc"}} {
-		out, code = run("fill", f[0], "op://Agents/Test card/"+f[1])
+		out, code = run("fill", f[0], "op://Agents/Test card/"+f[1], "--why", why)
 		want(out, code, 0, "✓ fill")
 		all.WriteString(out)
 	}
 	if n := approvals(); n != 1 {
 		t.Errorf("approvals: %d, want 1", n)
-	} else if r := e.vault.approvals[0]; !strings.Contains(r, "pay on 127.0.0.1") || !strings.Contains(r, "•••• 4242") {
+	} else if r := e.vault.approvals[0]; !strings.Contains(r, "pay on 127.0.0.1") || !strings.Contains(r, "•••• 4242") || !strings.Contains(r, "“"+why+"”") {
 		t.Errorf("approval: %s", r)
 	}
 	out, code = run("get", "value", "Last four")
@@ -936,9 +946,9 @@ func TestDriveCardInPaymentFrame(t *testing.T) {
 		t.Errorf("a card value came back: %s", s)
 	}
 	// the right field for each value; and only card fields
-	out, code = run("fill", cvc, "op://Agents/Test card/number")
+	out, code = run("fill", cvc, "op://Agents/Test card/number", "--why", why)
 	want(out, code, 1, "is for the card's cvc, not its number")
-	out, code = run("fill", "Email", "op://Agents/Test card/number")
+	out, code = run("fill", "Email", "op://Agents/Test card/number", "--why", why)
 	want(out, code, 1, "doesn't look like a card field")
 	if n := approvals(); n != 1 {
 		t.Errorf("the refusals asked the person: %d approvals", n)
@@ -946,7 +956,7 @@ func TestDriveCardInPaymentFrame(t *testing.T) {
 	// a shop's own card field, in the page itself
 	out, code = run("open", e.site.URL+"/checkout-own")
 	want(out, code, 0, "✓ Own checkout")
-	out, code = run("fill", "Card number", "op://Agents/Test card/number")
+	out, code = run("fill", "Card number", "op://Agents/Test card/number", "--why", why)
 	want(out, code, 0, "✓ fill")
 	out, code = run("get", "value", "Last four")
 	want(out, code, 0, "4242")

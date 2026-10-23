@@ -10,8 +10,6 @@ import (
 	"time"
 
 	op "github.com/1password/onepassword-sdk-go"
-
-	"github.com/aindeev/agent-chrome-relay/internal/phone"
 )
 
 // Cards. A Credit Card item has no website, so where its values go is the relay's to check (a checkout page, or a
@@ -123,7 +121,7 @@ func (v *Vault) approveCard(who Who, it op.Item, host, last4 string) error {
 	reason := fmt.Sprintf("let %s pay on %s with %q (•••• %s) from 1Password (card number, expiry and security code, for %d minutes)",
 		who.Name, host, it.Title, last4, int(signInWindow/time.Minute))
 	v.mu.Unlock()
-	err := v.Person.Approve(phone.Details{Reason: reason, Agent: who.Name, Site: host, What: "payment with •••• " + last4})
+	err := v.Person.Approve(who.details(reason, host, "payment with •••• "+last4))
 	v.mu.Lock()
 	if err != nil {
 		return err

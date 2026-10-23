@@ -137,6 +137,8 @@ type Agent struct {
 	dlSeq                int                               // the last download's id
 	pageFiles            map[string]*pageFile              // "tab:id" -> a file the page script is handing over
 	fileAt               map[int]time.Time                 // tab -> when its page's navigation last turned out to be a file (and was cancelled)
+	why                  string                            // the agent's last word on why it needs the accounts it asks for (--why, or do's goal)
+	whyAt                time.Time                         // when it said so: prompts quote it for whyFor, then say it gave no reason
 }
 
 // newLogin: a password Chrome Relay just made and saved, for the next fields of the same sign-up.

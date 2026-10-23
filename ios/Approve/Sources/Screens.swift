@@ -31,6 +31,12 @@ struct RequestScreen: View {
     } else {
       l.append(.body(p.reason.prefix(1).uppercased() + p.reason.dropFirst()))
     }
+    // the agent's reason, in its own words: quoted, since Chrome Relay checks the site and account, not this
+    if let why = p.why {
+      l += [.label("It says why"), .quote("“\(why)”")]
+    } else if p.noWhy {
+      l.append(.label("No reason given"))
+    }
     return l
   }
 

@@ -63,6 +63,6 @@ func (v *e2eVault) Unlock(key, reason string) (vault.Token, error) {
 func (v *e2eVault) Approve(d phone.Details) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.approvals = append(v.approvals, d.Reason)
+	v.approvals = append(v.approvals, d.Prompt()) // as Touch ID shows it
 	return nil
 }

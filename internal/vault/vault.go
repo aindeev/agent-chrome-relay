@@ -239,7 +239,7 @@ func (v *Vault) approve(who Who, it op.Item, host, what, reason string) error {
 	}
 	if !v.approvals[key].After(v.now()) {
 		v.mu.Unlock()
-		err := v.Person.Approve(phone.Details{Reason: reason, Agent: who.Name, Site: host, What: what})
+		err := v.Person.Approve(who.details(reason, host, what))
 		v.mu.Lock()
 		if err != nil {
 			return err
@@ -335,8 +335,14 @@ func (v *Vault) allowed() []place {
 	return out
 }
 
-// Who describes the agent asking, for prompts: "Claude Code (my-repo)". Session keys approvals.
-type Who struct{ Name, Session string }
+// Who describes the agent asking, for prompts: "Claude Code (my-repo)". Session keys approvals. Why is the agent's
+// own sentence on why it needs this ("" if it gave none): prompts quote it.
+type Who struct{ Name, Session, Why string }
+
+// details: an approval this agent asks for.
+func (who Who) details(reason, host, what string) phone.Details {
+	return phone.Details{Reason: reason, Agent: who.Name, Site: host, What: what, Why: who.Why, FromAgent: true}
+}
 
 // Resolve: the value a reference stands for, if this page may have it, after the person's approval.
 // Errors are messages for the agent.

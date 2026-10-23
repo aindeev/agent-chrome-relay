@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,6 +32,7 @@ Whatever it isn't sure of comes back to you (exit code 2) with what it did and w
   --data <key>=<v>    a value for the goal; the key names the field ("Email=ada@x.com"); v may be op://vault/item/field
   --allow <verb>      let it click a consequential button the goal doesn't name (delete, send, pay, ...; * = any)
   --url <url>         open this page first (--profile <email>: in that Chrome profile, for a new session)
+  --why <sentence>    why you need the accounts it signs in with, for Touch ID and the iPhone (default: the goal)
   --tab <id>          which of your tabs (default: the one you used last)
   --max-steps <n>     default 25        --timeout <seconds>  default 120
   --decider <name>    auto (default: jev, then claude), jev, claude, none
@@ -56,6 +58,7 @@ type doOpts struct {
 	minConf         float64
 	noFlow, jsonOut bool
 	url, profile    string // open this page first (in this Chrome profile, for a new session)
+	why             string // for approvals on the way (default: the goal)
 }
 
 func parseDo(args []string) (doOpts, error) {
@@ -72,7 +75,7 @@ func parseDo(args []string) (doOpts, error) {
 		var v string
 		var err error
 		switch a {
-		case "--until", "--data", "--allow", "--tab", "--max-steps", "--timeout", "--decider", "--min-confidence", "--url", "--profile":
+		case "--until", "--data", "--allow", "--tab", "--max-steps", "--timeout", "--decider", "--min-confidence", "--url", "--profile", "--why":
 			if v, err = next(&i, a); err != nil {
 				return o, err
 			}
@@ -101,6 +104,8 @@ func parseDo(args []string) (doOpts, error) {
 			o.url = v
 		case "--profile":
 			o.profile = v
+		case "--why":
+			o.why, err = oneSentence(v)
 		case "--tab":
 			o.tab, err = strconv.Atoi(v)
 		case "--max-steps":
@@ -149,9 +154,13 @@ type driver struct {
 	tok    string
 	client *http.Client
 	tab    int
+	why    string // the agent's one sentence on why (--why, or do's goal): Touch ID and the iPhone quote it
 }
 
 func (d *driver) call(path string, body, out any) error {
+	if m, ok := body.(map[string]any); ok && d.why != "" {
+		m["why"] = d.why
+	}
 	b, _ := json.Marshal(body)
 	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/driver/%s?token=%s", d.c.Port, path, d.tok), bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
@@ -224,6 +233,8 @@ func (c *cli) do() error {
 		return err
 	}
 	d.tab = o.tab
+	// what a sign-in on the way asks the person quotes the agent's why: the goal, unless it said one
+	d.why = cmp.Or(o.why, cut(decide.Redact(o.goal, o.data), 160))
 	models, names := c.deciders(o.decider)
 	defer func() {
 		for _, m := range models {

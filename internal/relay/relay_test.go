@@ -676,7 +676,8 @@ func TestPasskeysForThePageItselfAndHandoffs(t *testing.T) {
 	if !ecdsa.VerifyASN1(pub.(*ecdsa.PublicKey), signed[:], d(got["signature"])) {
 		t.Error("the site cannot verify the sign-in")
 	}
-	if want := "let Claude Code (my-repo) sign in to webauthn.example as bot, from webauthn.example"; len(h.chip.reasons) == 0 || h.chip.reasons[0] != want {
+	// this agent (over agent-browser) never said why: the prompt says so
+	if want := "let Claude Code (my-repo) sign in to webauthn.example as bot, from webauthn.example. It didn't say why"; len(h.chip.reasons) == 0 || h.chip.reasons[0] != want {
 		t.Errorf("Touch ID reason %q, want %q", h.chip.reasons, want)
 	}
 

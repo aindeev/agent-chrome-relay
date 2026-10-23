@@ -12,8 +12,6 @@ import (
 	"strings"
 
 	op "github.com/1password/onepassword-sdk-go"
-
-	"github.com/aindeev/agent-chrome-relay/internal/phone"
 )
 
 // Saving: agents create accounts and turn on 2-step verification, and the secrets go straight into 1Password.
@@ -98,7 +96,7 @@ func (v *Vault) approveSave(who Who, host, what, reason string) error {
 		return nil
 	}
 	v.mu.Unlock()
-	err := v.Person.Approve(phone.Details{Reason: reason, Agent: who.Name, Site: host, What: what})
+	err := v.Person.Approve(who.details(reason, host, what))
 	v.mu.Lock()
 	return err
 }

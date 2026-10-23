@@ -320,9 +320,10 @@ Agents fill a field with a [secret reference](https://developer.1password.com/do
 and the relay types the real value:
 
 ```bash
-chrome-relay fill @e2 "op://Shared with Chrome Relay/Twilio/username"
-chrome-relay fill @e3 "op://Shared with Chrome Relay/Twilio/password"
-chrome-relay fill @e7 "op://Shared with Chrome Relay/Twilio/otp"   # the current one-time code, from the item's TOTP secret
+why="Download March's invoice for the books"
+chrome-relay fill @e2 "op://Shared with Chrome Relay/Twilio/username" --why "$why"
+chrome-relay fill @e3 "op://Shared with Chrome Relay/Twilio/password" --why "$why"
+chrome-relay fill @e7 "op://Shared with Chrome Relay/Twilio/otp" --why "$why"   # the current one-time code, from the item's TOTP secret
 ```
 
 - **Which account.** You may have several logins for one site (three Twilio items, say). The relay never picks:
@@ -330,7 +331,10 @@ chrome-relay fill @e7 "op://Shared with Chrome Relay/Twilio/otp"   # the current
   when your request doesn't say which.
 - **Chrome Relay asks too, with the details.** Its own approval names the agent, item and site, on Touch ID here
   and, if you paired one, Face ID on your iPhone at the same time (first answer wins; see below): *"let Claude Code
-  (my-repo) sign in to www.twilio.com as you@company.com with "Twilio" from 1Password"*. How often is yours: **every
+  (my-repo) sign in to www.twilio.com as you@company.com with "Twilio" from 1Password. It says why: “Download
+  March's invoice for the books”"*. The why is the agent's own sentence, quoted as such (`--why`, required with a
+  reference; `chrome-relay do` uses its goal): Chrome Relay checks the site and the account, not the reason, and
+  says so when an agent gave none. How often is yours: **every
   sign-in** (the default: one approval lets that agent use that item for two minutes: its username, password and
   one-time code, on any of the item's websites), **once per agent session** (one approval, naming the vaults, covers
   that agent's sign-ins until it disconnects), or **never**. Change it with `chrome-relay vault approve
@@ -383,7 +387,8 @@ it. So keep in the vault only accounts you're happy for agents to use, and give 
   your `chrome-relay`, on this Mac, can use it.
 - **Every sign-in needs your approval**, Touch ID here or Face ID on your paired iPhone, saying who is asking,
   for which site and account: *"chrome-relay is trying to let Claude Code (my-repo) sign in to github.com as
-  bot@company.com, from github.com"*. If an agent signs in to many sites in a row, `chrome-relay passkeys reuse
+  bot@company.com, from github.com. It says why: “Merge the release PR you approved”"* (the agent's last `--why`
+  from the past 10 minutes). If an agent signs in to many sites in a row, `chrome-relay passkeys reuse
   120` lets one approval cover **that agent's** passkey sign-ins for 2 minutes (up to 300 seconds; the prompt
   says so; other agents still ask). Off by default.
 - **Creating one.** A site's "Create a passkey" (only right after the agent clicked or typed in the page, and
@@ -408,7 +413,7 @@ it. So keep in the vault only accounts you're happy for agents to use, and give 
 
 ### Paying with a card
 
-A 1Password Credit Card item pays at checkouts: `chrome-relay fill @eN "op://<vault>/<card>/number"` (also `expiry`,
+A 1Password Credit Card item pays at checkouts: `chrome-relay fill @eN "op://<vault>/<card>/number" --why "..."` (also `expiry`,
 `expiry-month`, `expiry-year`, `cvc`, `name`). A card has no website, so the relay decides where it goes: only into
 the matching card field of the checkout page itself (https) or of a payment provider's frame in it (Stripe,
 Braintree, Adyen, Checkout.com, Square, PayPal and a few more), never another site's frame. Every payment asks you,
@@ -424,7 +429,8 @@ When you're away from the Mac, a paired iPhone can approve instead: `chrome-rela
 shows a QR code; scan it with the iPhone's Camera and open it in *Chrome Relay Approve* ([join the beta on
 TestFlight](https://testflight.apple.com/join/zhpm8gND), or build it from `ios/` with `./ios/build`; `./ios/release`
 sends your own build to TestFlight). From then on every approval goes to Touch ID here and to the iPhone at once, and
-the first answer wins. The iPhone shows the Mac, the agent and what it asks, and approves with Face ID: its key
+the first answer wins. The iPhone shows the Mac, the agent, what it asks and why it says it needs it (its own
+sentence, quoted; "no reason given" when it gave none), and approves with Face ID: its key
 for that lives in the iPhone's Secure Enclave, and the Mac checks the signature against the key it paired with,
 so nothing in between can approve.
 
