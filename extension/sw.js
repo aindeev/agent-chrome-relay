@@ -245,8 +245,16 @@ function googleAuthStep(account) {
   if (btn) { btn.click(); return { state: "clicked", what: btn.innerText.trim() }; }
   return { state: "waiting" };
 }
+// The site a Google hop returns to, so the hop can pick that site's account. siteAccounts is keyed by
+// hostname: a port is not part of it. A relative redirect (new URL throws) must not hide a later continue.
 function hostOfAuth(u) {
-  try { const url = new URL(u); for (const k of ["redirect_uri", "continue", "service_url", "origin"]) { const v = url.searchParams.get(k); if (v) return new URL(v).host; } } catch (e) {}
+  let url;
+  try { url = new URL(u); } catch (e) { return ""; }
+  for (const k of ["redirect_uri", "continue", "service_url", "origin"]) {
+    const v = url.searchParams.get(k);
+    if (!v || !/^[a-z][a-z0-9+.-]*:/i.test(v)) continue;
+    try { const host = new URL(v).hostname; if (host) return host; } catch (e) {}
+  }
   return "";
 }
 async function handleGoogleAuth(tabId) {
