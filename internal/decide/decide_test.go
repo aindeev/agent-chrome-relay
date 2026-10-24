@@ -162,6 +162,14 @@ func TestFlows(t *testing.T) {
 	if shape != "invite {name} to the team" {
 		t.Fatal(shape)
 	}
+	// a first name inside a full name must not eat the longer value, or the next invite saves a different shape
+	overlap := []Datum{{"first", "Ada"}, {"full", "Ada Lovelace"}}
+	if got := Shape("Invite Ada Lovelace to the team", overlap); got != "invite {full} to the team" {
+		t.Fatalf("shorter value wins: %q", got)
+	}
+	if got := Shape("Invite Bob Smith to the team", []Datum{{"first", "Bob"}, {"full", "Bob Smith"}}); got != "invite {full} to the team" {
+		t.Fatalf("next run does not share the flow: %q", got)
+	}
 	steps := []Step{{Op: "fill", Node: 9, Role: "textbox", Label: "Name", DataKey: "name", Source: "jev", Confidence: 0.9}, {Op: "click", Role: "button", Label: "Invite"}}
 	if err := f.Save("app.example", shape, steps); err != nil {
 		t.Fatal(err)
