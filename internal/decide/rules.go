@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -124,11 +125,26 @@ type Flow struct {
 type Flows struct{ Dir string }
 
 // Shape: the goal with data values replaced by their keys, so "invite ada@x.com" and "invite bob@y.com" share a flow.
+// Longer values go first: a first name inside a full name must not be replaced on its own, and a value must not
+// match text inside a placeholder already written.
 func Shape(goal string, data []Datum) string {
-	g := goal
-	for _, d := range data {
+	type repl struct {
+		value, token string
+	}
+	var rs []repl
+	for i, d := range data {
 		if d.Value != "" {
-			g = strings.ReplaceAll(g, d.Value, "{"+d.Key+"}")
+			rs = append(rs, repl{d.Value, fmt.Sprintf("\x00%d\x00", i)})
+		}
+	}
+	slices.SortStableFunc(rs, func(a, b repl) int { return len(b.value) - len(a.value) })
+	g := goal
+	for _, r := range rs {
+		g = strings.ReplaceAll(g, r.value, r.token)
+	}
+	for i, d := range data {
+		if d.Value != "" {
+			g = strings.ReplaceAll(g, fmt.Sprintf("\x00%d\x00", i), "{"+d.Key+"}")
 		}
 	}
 	return strings.Join(strings.Fields(strings.ToLower(g)), " ")
