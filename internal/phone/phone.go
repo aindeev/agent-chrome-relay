@@ -238,9 +238,12 @@ func (d Details) Prompt() string {
 	return d.Reason
 }
 
-// ShortWhy is an agent's why as prompts show it: one line, at most 160 characters.
+// ShortWhy is an agent's why as prompts show it: one line, at most 160 characters. Format characters other
+// than the emoji joiner are dropped: a right-to-left override would show the quoted sentence backwards.
 func ShortWhy(s string) string {
-	s = strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }), " ")
+	s = strings.Join(strings.FieldsFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r) || (unicode.Is(unicode.Cf, r) && r != '\u200d')
+	}), " ")
 	if r := []rune(s); len(r) > 160 {
 		s = strings.TrimSpace(string(r[:159])) + "…"
 	}
