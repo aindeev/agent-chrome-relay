@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-export async function extensionFixture({ remove, get, group, windowIds = [1], saved = {}, tabs = [7], manifest = {} } = {}) {
+export async function extensionFixture({ remove, get, group, create, windowIds = [1], saved = {}, tabs = [7], manifest = {} } = {}) {
   const messages = [], persisted = { ...saved }, runtime = { reloads: 0, updateChecks: 0 };
   const live = new Set(tabs);
   const groups = new Map(), groupCalls = [];
@@ -19,7 +19,7 @@ export async function extensionFixture({ remove, get, group, windowIds = [1], sa
     tabGroups: { get: async (id) => { if (!groups.has(id)) throw new Error('No group'); return groups.get(id); },
       update: async (id, data) => Object.assign(groups.get(id), structuredClone(data)) },
     tabs: { get: async (id) => { if (get) await get(id); if (!live.has(id)) throw new Error(`No tab with id: ${id}.`); return { id, windowId: 1 }; },
-      create: async (options) => { const id = nextTab++; live.add(id); return { id, windowId: options.windowId ?? 1 }; },
+      create: async (options) => { if (create) await create(options); const id = nextTab++; live.add(id); return { id, windowId: options.windowId ?? 1 }; },
       group: async (options) => {
         groupCalls.push(structuredClone(options));
         if (group) await group(options);
