@@ -16,6 +16,7 @@ const Linked = false
 func KeychainSet(service, account string, value []byte) error      { return ErrUnsupported }
 func KeychainGet(service, account string) ([]byte, error)          { return nil, ErrUnsupported }
 func KeychainDelete(service, account string) error                 { return ErrUnsupported }
+func KeychainAccounts(service string) ([]string, error)            { return nil, ErrUnsupported }
 func Authenticate(reason string) error                             { return ErrUnsupported }
 func AuthenticateContext(ctx context.Context, reason string) error { return ErrUnsupported }
 func Lock(secret []byte, silent bool) ([]byte, error)              { return nil, ErrUnsupported }

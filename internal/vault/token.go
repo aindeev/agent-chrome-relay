@@ -100,6 +100,27 @@ func (p MacPerson) Unlock(key, reason string) (Token, error) {
 	return t, nil
 }
 
+// ReadToken opens the stored token for reason, as Unlock does, but leaves the Keychain item exactly as it is
+// (Unlock re-saves an older item). ErrNotFound when there is none.
+func ReadToken(instance, key, reason string) (Token, error) {
+	locked, err := macos.KeychainGet(keychainService, keychainAccount(instance, key))
+	if err != nil {
+		return Token{}, err
+	}
+	plain, err := macos.Unlock(locked, reason)
+	if err != nil {
+		return Token{}, err
+	}
+	var t Token
+	if json.Unmarshal(plain, &t) != nil || t.Value == "" {
+		t = Token{Value: string(plain)} // an older Chrome Relay stored the bare token
+	}
+	if t.Approve == "" {
+		t.Approve = "sign-in"
+	}
+	return t, nil
+}
+
 // Approve asks for Touch ID, and, with a paired iPhone (`chrome-relay phone pair`), Face ID on the phone at the
 // same time: the first approval wins.
 func (p MacPerson) Approve(d phone.Details) error {
