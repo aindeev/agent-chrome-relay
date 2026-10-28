@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-export async function extensionFixture({ remove, get, group, create, windowIds = [1], saved = {}, tabs = [7], manifest = {} } = {}) {
+export async function extensionFixture({ remove, get, group, create, reload, windowIds = [1], saved = {}, tabs = [7], manifest = {} } = {}) {
   const messages = [], persisted = { ...saved }, runtime = { reloads: 0, updateChecks: 0 };
   const live = new Set(tabs);
   const groups = new Map(), groupCalls = [];
@@ -12,7 +12,7 @@ export async function extensionFixture({ remove, get, group, create, windowIds =
     storage: { session: storage, local: storage },
     identity: { getProfileUserInfo: async () => ({ email: 'fixture@example.test' }) },
     alarms: { create() {}, onAlarm: event() },
-    runtime: { onStartup: event(), onInstalled: event(), onUpdateAvailable: event(), reload() { runtime.reloads++; },
+    runtime: { onStartup: event(), onInstalled: event(), onUpdateAvailable: event(), reload() { runtime.reloads++; if (reload) reload(messages); },
       requestUpdateCheck: async () => { runtime.updateChecks++; return { status: 'no_update' }; }, getManifest: () => ({ version: 'test', ...manifest }) },
     debugger: { onEvent: event(), onDetach: event(), detach: async () => {}, attach: async () => {} },
     windows: { getLastFocused: async () => ({ id: windowIds[windowIndex++ % windowIds.length] }) },

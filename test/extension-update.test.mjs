@@ -47,11 +47,12 @@ test('a Web Store update waits for an in-flight tab creation', async () => {
 
 
 test('a failed tab creation releases a waiting Web Store update', async () => {
-  let release, started;
+  let release, started, repliedBeforeReload = false;
   const creating = new Promise((resolve) => { started = resolve; });
   const pending = new Promise((resolve) => { release = resolve; });
   const f = await extensionFixture({ tabs: [], manifest: store,
-    create: async () => { started(); await pending; throw new Error('creation failed'); } });
+    create: async () => { started(); await pending; throw new Error('creation failed'); },
+    reload: (messages) => { repliedBeforeReload = messages.at(-1)?.error === 'creation failed'; } });
   const operation = f.handle({ op: 'create', id: 1 });
   await creating;
   await f.updateAvailable();
@@ -59,6 +60,7 @@ test('a failed tab creation releases a waiting Web Store update', async () => {
   release();
   await operation;
   assert.match(f.messages.at(-1).error, /creation failed/);
+  assert.ok(repliedBeforeReload, 'deliver the error before terminating the worker');
   assert.equal(f.runtime.reloads, 1, 'failed creates must not defer updates forever');
 });
 

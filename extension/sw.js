@@ -155,7 +155,7 @@ async function handle(m) {
           throw err;
         }
         return send({ id: m.id, result: { tabId: tab.id } });
-      } finally { creatingTabs--; updateIfIdle(); }
+      } finally { creatingTabs--; }
     }
     if (m.op === "cdp") {
       const result = await chrome.debugger.sendCommand({ tabId: m.tabId, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }, m.method, m.params || {});
@@ -163,6 +163,7 @@ async function handle(m) {
     }
     if (m.op === "close") { await closeTrackedTab(m.tabId); return send({ id: m.id, result: {} }); }
   } catch (e) { send({ id: m.id, error: String(e && e.message || e) }); }
+  finally { if (m.op === "create") updateIfIdle(); }
 }
 
 chrome.debugger.onEvent.addListener((src, method, params) => {
