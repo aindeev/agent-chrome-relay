@@ -9,6 +9,7 @@ package macos
 char *cr_keychain_set(const char *, const char *, const char *);
 char *cr_keychain_get(const char *, const char *);
 char *cr_keychain_delete(const char *, const char *);
+char *cr_keychain_accounts(const char *);
 char *cr_authenticate(const char *);
 char *cr_authenticate_as(const char *, const char *);
 void cr_authenticate_stop(const char *);
@@ -95,6 +96,16 @@ func KeychainGet(service, account string) ([]byte, error) {
 func KeychainDelete(service, account string) error {
 	_, err := call(func(a ...*C.char) *C.char { return C.cr_keychain_delete(a[0], a[1]) }, service, account)
 	return err
+}
+
+// KeychainAccounts lists the accounts of service's items, reading no value (no prompt).
+func KeychainAccounts(service string) ([]string, error) {
+	raw, err := call(func(a ...*C.char) *C.char { return C.cr_keychain_accounts(a[0]) }, service)
+	if err != nil {
+		return nil, err
+	}
+	var accounts []string
+	return accounts, json.Unmarshal(raw, &accounts)
 }
 
 // Authenticate asks the person for Touch ID (or their password). ErrCancelled if they decline.

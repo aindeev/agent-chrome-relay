@@ -52,6 +52,16 @@ private func query(_ service: UnsafePointer<CChar>, _ account: UnsafePointer<CCh
   return st == errSecSuccess || st == errSecItemNotFound ? ok() : json(["error": "Keychain error \(st)"])
 }
 
+// The accounts of this service's items, without reading any value (attributes only: no prompt).
+@_cdecl("cr_keychain_accounts") public func cr_keychain_accounts(_ service: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar> {
+  let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: s(service),
+                          kSecReturnAttributes as String: true, kSecMatchLimit as String: kSecMatchLimitAll]
+  var out: CFTypeRef?; let st = SecItemCopyMatching(q as CFDictionary, &out)
+  if st == errSecItemNotFound { return ok([String]()) }
+  guard st == errSecSuccess, let items = out as? [[String: Any]] else { return json(["error": "Keychain error \(st)"]) }
+  return ok(items.compactMap { $0[kSecAttrAccount as String] as? String })
+}
+
 // ---- Touch ID (or the Mac's password) with a reason: "chrome-relay is trying to <reason>"
 @_cdecl("cr_authenticate") public func cr_authenticate(_ reason: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar> {
   let c = LAContext(); var err: NSError?

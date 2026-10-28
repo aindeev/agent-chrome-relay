@@ -444,6 +444,17 @@ without it: `chrome-relay phone pair --server` takes any [ntfy](https://ntfy.sh)
 --key …` uses your own Apple key, and `CHROME_RELAY_PUSH_RELAY=off` turns the relay off. `chrome-relay phone`
 shows what is in use.
 
+## Moving to S4 Code
+
+S4 Code has Chrome Relay built in. Its **Settings > Chrome > Import from
+Chrome Relay** takes over this install's passkeys and 1Password access, so nothing has to be made again: no new
+passkeys, no second vault. It runs `chrome-relay export --for s4` itself, which asks for Touch ID (*"chrome-relay is
+trying to Move Chrome Relay's passkeys and 1Password access to S4 Code"*) and then prints one JSON object for S4
+Code to read: the Secure Enclave handles of the passkeys Chrome Relay made on this Mac (the keys themselves never
+leave the chip, and a handle works only on this Mac), each service account with its token and how often it asks,
+the passkey settings, the TypeSafe key and the flows `do` learned. It changes nothing here, in the Keychain or in
+1Password, so Chrome Relay keeps working afterwards. It won't print to a terminal, since its output holds secrets.
+
 ## Audit trail
 
 Every agent action is recorded in `~/.chrome-relay/audit/YYYY-MM-DD.jsonl`; read it with `chrome-relay audit`: who

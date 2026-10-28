@@ -49,6 +49,8 @@ const usage = `Chrome Relay: your coding agents drive background tabs in your ev
   chrome-relay decider [jev|claude ...]  what ` + "`do`" + ` asks: TypeSafe's Jev (` + "`pbpaste | chrome-relay decider jev`" + `),
                                    else Haiku through your Claude Code
   chrome-relay flows [forget <site>]  the flows ` + "`do`" + ` saved, replayed without a model
+  chrome-relay export --for s4     after Touch ID, print this Mac's passkey keys, 1Password service accounts, settings,
+                                   TypeSafe key and flows as JSON for S4 Code's import (changes nothing here)
   chrome-relay status              connected profiles and agents
   chrome-relay doctor              check everything and say how to fix what's wrong
   chrome-relay update [--force]    after ` + "`git pull` and `./build`" + `: restart the relay and reload the extension everywhere (refused while agents are connected, unless --force)
@@ -147,6 +149,7 @@ type cli struct {
 	op      func(args ...string) (stdout, stderr []byte, err error) // tests: the 1Password CLI
 	opAccts func() []opAccount                                      // tests: its accounts
 	models  func(choice string) ([]decide.Model, []string)          // tests: the deciders `do` asks
+	secrets exportSecrets                                           // tests: Touch ID and the Keychain, for export
 }
 
 func (c *cli) stdin() io.Reader {
@@ -203,6 +206,8 @@ func (c *cli) run() error {
 		return c.decider()
 	case "flows":
 		return c.flows()
+	case "export":
+		return c.export()
 	case "identities":
 		return c.identities()
 	case "vault":
