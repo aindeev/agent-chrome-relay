@@ -171,6 +171,10 @@ func TestPromptQuotesWhy(t *testing.T) {
 	if got := []rune(ShortWhy(strings.Repeat("a", 300))); len(got) != 160 || got[159] != '…' {
 		t.Error(len(got))
 	}
+	// a right-to-left override would display the quoted reason backwards on Touch ID and the iPhone
+	if got := ShortWhy("Download \u202ethe invoice"); got != "Download the invoice" {
+		t.Fatalf("direction override stays in the prompt: %q", got)
+	}
 }
 
 func TestDeniedForgedAndTimedOut(t *testing.T) {
