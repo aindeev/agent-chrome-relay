@@ -7,6 +7,7 @@ const relayPort = (async () => Number((await (await fetch(chrome.runtime.getURL(
 relayPort.then((port) => port !== 9333 && chrome.action.setTitle({ title: `Chrome Relay (dev mode, relay on port ${port})` }));
 let ws = null, email = "";
 const agentTabs = new Set();
+let creatingTabs = 0;            // creation may be pending before Chrome returns a tab id
 const agentGroups = new Map();    // windowId -> the tab group THIS extension created for agents (never matched by title)
 let nativeNotify = false;         // the relay notifies through Chrome Relay.app: then this extension doesn't, too
 let siteAccounts = {};            // host -> Google account email, from ~/.chrome-relay/identities.json via the relay
@@ -140,18 +141,21 @@ async function handle(m) {
     }
     if (m.op === "version") return send({ id: m.id, result: { version: chrome.runtime.getManifest().version } });
     if (m.op === "create") {
-      const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
-      const tab = await chrome.tabs.create({ url: "about:blank", active: false, ...(win ? { windowId: win.id } : {}) });
-      agentTabs.add(tab.id); remember();
+      creatingTabs++;
       try {
-        await groupAgentTab(tab.id, tab.windowId);
-      } catch (e) { /* tab groups unavailable (e.g. headless) */ }
-      try { await chrome.debugger.attach({ tabId: tab.id }, "1.3"); }
-      catch (err) {   // a tab we cannot drive is useless: do not leave it open
-        await closeTrackedTab(tab.id).catch((e) => console.warn("tab cleanup failed", e));
-        throw err;
-      }
-      return send({ id: m.id, result: { tabId: tab.id } });
+        const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
+        const tab = await chrome.tabs.create({ url: "about:blank", active: false, ...(win ? { windowId: win.id } : {}) });
+        agentTabs.add(tab.id); remember();
+        try {
+          await groupAgentTab(tab.id, tab.windowId);
+        } catch (e) { /* tab groups unavailable (e.g. headless) */ }
+        try { await chrome.debugger.attach({ tabId: tab.id }, "1.3"); }
+        catch (err) {   // a tab we cannot drive is useless: do not leave it open
+          await closeTrackedTab(tab.id).catch((e) => console.warn("tab cleanup failed", e));
+          throw err;
+        }
+        return send({ id: m.id, result: { tabId: tab.id } });
+      } finally { creatingTabs--; }
     }
     if (m.op === "cdp") {
       const result = await chrome.debugger.sendCommand({ tabId: m.tabId, ...(m.sessionId ? { sessionId: m.sessionId } : {}) }, m.method, m.params || {});
@@ -159,6 +163,7 @@ async function handle(m) {
     }
     if (m.op === "close") { await closeTrackedTab(m.tabId); return send({ id: m.id, result: {} }); }
   } catch (e) { send({ id: m.id, error: String(e && e.message || e) }); }
+  finally { if (m.op === "create") updateIfIdle(); }
 }
 
 chrome.debugger.onEvent.addListener((src, method, params) => {
@@ -307,9 +312,9 @@ chrome.tabs.onRemoved.addListener(async (tabId) => { await restored;
   clearHandoff(tabId);
   if (closing.has(tabId)) return; if (agentTabs.delete(tabId)) { send({ detached: { tabId, reason: "closed" } }); updateIfIdle(); } });
 // The Web Store's updates: Chrome would wait for this worker to go idle, which an open WebSocket never lets it do.
-// Reloading forgets the agent tabs (session storage is cleared) and drops their debugger, so wait until there are none.
+// Reloading forgets the agent tabs (session storage is cleared) and drops their debugger, so wait until there are none and no creation is in flight.
 let updateReady = false;
-function updateIfIdle() { if (updateReady && agentTabs.size === 0) chrome.runtime.reload(); }
+function updateIfIdle() { if (updateReady && creatingTabs === 0 && agentTabs.size === 0) chrome.runtime.reload(); }
 chrome.runtime.onUpdateAvailable?.addListener(() => { updateReady = true; restored.then(updateIfIdle); });
 // The bridge may start later than Chrome: keep trying. Open WebSocket traffic keeps this worker alive.
 chrome.alarms.create("connect", { periodInMinutes: 0.5 });
