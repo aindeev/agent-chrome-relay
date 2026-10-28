@@ -37,7 +37,7 @@ export async function extensionFixture({ remove, get, group, windowIds = [1], sa
   const context = vm.createContext({ chrome, WebSocket: Socket, crypto: { randomUUID: () => 'fixture-client' }, console,
     setTimeout, Date: Clock, URL });
   const source = fs.readFileSync(new URL('../../extension/sw.js', import.meta.url), 'utf8');
-  vm.runInContext(source + '\n globalThis.fixture = { handle, connect, closeAgentTabs, agentTabs };', context);
+  vm.runInContext(source + '\n globalThis.fixture = { handle, connect, closeAgentTabs, agentTabs, hostOfAuth };', context);
   await context.fixture.connect();
   return { ...context.fixture, messages, persisted, live, sockets, groups, groupCalls, runtime,
     updateAvailable: () => Promise.all(chrome.runtime.onUpdateAvailable.listeners.map((listener) => listener())),
