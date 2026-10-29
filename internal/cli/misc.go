@@ -27,7 +27,7 @@ func (c *cli) url() error {
 		if err != nil {
 			return err
 		}
-		if !d.obj("profiles").has(email) {
+		if !d.obj("profiles").has(email) && !c.connected(email) {
 			return fmt.Errorf("unknown profile %s; see `%s identities`", email, c.Name)
 		}
 	}
@@ -37,6 +37,13 @@ func (c *cli) url() error {
 	}
 	c.println(agentURL(c.Port, tok, email))
 	return nil
+}
+
+// connected: is email a profile whose extension the relay has right now? Such a profile is usable even when
+// identities.json does not list it (setup could not read Chrome's own profile list).
+func (c *cli) connected(email string) bool {
+	s, err := c.relayStatus()
+	return err == nil && slices.Contains(s.Profiles, email)
 }
 
 // agentURL: token first, then profile, as Python's urlencode did.

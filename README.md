@@ -267,7 +267,10 @@ does it ask you, saying what it needs.
 
 Which Google account a site uses comes from `~/.chrome-relay/identities.json` (`chrome-relay identities`):
 your Chrome profiles (filled in by setup), optional hand-set `sites.rules`, and `sites.learned`, which the
-relay fills in after each successful hop. Default: the profile's own account.
+relay fills in after each successful hop. Default: the profile's own account. Setup reads your profiles from
+Chrome's own `Local State`; when macOS keeps Chrome's data folder from your terminal, it says so and records the
+profiles whose extension is connected instead, and `url <email>` accepts any connected profile either way. A
+profile can hold several Google accounts: list them under its `googleAccounts` so a rule can pick one.
 
 ## What's optional
 

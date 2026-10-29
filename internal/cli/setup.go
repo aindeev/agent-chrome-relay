@@ -39,19 +39,21 @@ func extensionID(folder string) string {
 
 type chromeProfile struct{ Email, Dir string }
 
-// chromeProfiles: email -> Chrome profile directory, from Chrome's own Local State (in Chrome's order).
-func chromeProfiles(userHome string) []chromeProfile {
+// chromeProfiles: email -> Chrome profile directory, from Chrome's own Local State (in Chrome's order). The
+// error says why there is no list: macOS can keep Chrome's data folder from the terminal running setup
+// ("operation not permitted"), and a silent empty list then made every `url <email>` "unknown profile".
+func chromeProfiles(userHome string) ([]chromeProfile, error) {
 	b, err := os.ReadFile(filepath.Join(userHome, "Library", "Application Support", "Google", "Chrome", "Local State"))
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	v, err := parseJSON(b)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	root, ok := v.(*object)
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("Local State is not a JSON object")
 	}
 	cache := root.obj("profile").obj("info_cache")
 	var out []chromeProfile
@@ -60,7 +62,22 @@ func chromeProfiles(userHome string) []chromeProfile {
 			out = append(out, chromeProfile{email, dir})
 		}
 	}
-	return out
+	return out, nil
+}
+
+// addProfile records email in identities' profiles unless it is there already (keeping its `use` and
+// accounts); dir is set when known.
+func addProfile(profiles *object, email, dir string) {
+	entry, ok := profiles.get(email).(*object)
+	if !ok {
+		entry = newObject()
+		entry.set("chromeProfile", dir)
+		entry.set("use", "")
+		profiles.set(email, entry)
+	}
+	if dir != "" {
+		entry.set("chromeProfile", dir)
+	}
 }
 
 func xmlEscape(s string) string {
@@ -161,15 +178,22 @@ func (c *cli) setup() error {
 		profiles = newObject()
 		d.set("profiles", profiles)
 	}
-	for _, p := range chromeProfiles(c.UserHome) {
-		entry, ok := profiles.get(p.Email).(*object)
-		if !ok {
-			entry = newObject()
-			entry.set("chromeProfile", p.Dir)
-			entry.set("use", "")
-			profiles.set(p.Email, entry)
+	found, readErr := chromeProfiles(c.UserHome)
+	for _, p := range found {
+		addProfile(profiles, p.Email, p.Dir)
+	}
+	// Profiles whose extension is connected now count too: they are the ones agents can use, and they are
+	// all there is when Chrome's own list could not be read.
+	if c.up() {
+		if s, err := c.relayStatus(); err == nil {
+			for _, email := range s.Profiles {
+				addProfile(profiles, email, "")
+			}
 		}
-		entry.set("chromeProfile", p.Dir)
+	}
+	if readErr != nil {
+		c.printf("identities: could not read Chrome's profile list (%v); macOS may be keeping Chrome's data from this terminal. "+
+			"Profiles whose extension is connected are recorded; run `%s setup` again once the rest are open in Chrome\n", readErr, c.Name)
 	}
 	if err := writeJSON(filepath.Join(c.Home, "identities.json"), d); err != nil {
 		return err
