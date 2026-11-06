@@ -146,8 +146,9 @@ clicks they had to repeat.</p>
 
 <h2>Limits</h2>
 <ul>
-  <li>The page reader covers HTML and ARIA controls and open shadow roots. It doesn't yet look inside iframes or
-    closed shadow roots, and canvas apps (such as Google Docs) are out of reach.</li>
+  <li>The page reader covers HTML and ARIA controls, open shadow roots and same-origin frames. It can report visible
+    cross-origin frames by host, but cannot read their contents. Closed shadow roots and canvas apps (such as Google
+    Docs) are out of reach.</li>
   <li>A decision model can be wrong. That's why confidence is gated, consequential clicks need the goal to name them,
     and "done" needs <code>--until</code>.</li>
   <li>Page text is untrusted. The model only picks among the page's own controls and the agent's own values, and the
