@@ -34,6 +34,8 @@
     const proxy = { closed: false, name: name || "", opener: window, focus() {}, blur() {},
       get document() { return doc || (doc = document.implementation.createHTMLDocument("")); },
       get location() { return loc; }, set location(u) { loc.href = u; },
+      // `popup.open(url, "_self")`: pages that open a blank popup first, then send it to the file once they have its link
+      open(u) { if (u) loc.href = u; return proxy; },
       close() { if (!proxy.closed) { proxy.closed = true; send({ op: "close", id }); } },
       postMessage(data, targetOrigin) { send({ op: "toPopup", id, data, targetOrigin, origin: location.origin }); } };
     popups[id] = proxy;
