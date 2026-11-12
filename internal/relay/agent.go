@@ -973,6 +973,19 @@ func (a *Agent) onReattached(t int) bool {
 			err = a.extMust(p, map[string]any{"op": "cdp", "tabId": t, "method": "Page.reload", "params": map[string]any{}})
 		}
 	}
+	if err != nil && strings.Contains(err.Error(), "Detached while handling command") {
+		// Chrome dropped the session again while it was being set up (a sign-in that hops between sites swaps the
+		// tab's process more than once): the extension re-attaches it once more, and that re-attach sets it up.
+		// Closing it here would lose the person's sign-in. Held commands keep waiting on the same pause.
+		a.s.log("tab", t, "detached again while it was being set up; waiting for the next re-attach")
+		for sid, tt := range a.child {
+			if tt == t {
+				delete(a.child, sid)
+			}
+		}
+		a.forgetFrames(t)
+		return true
+	}
 	if err != nil {
 		// All or nothing: without the full setup (focus, popup shim, the agent's own enables) the tab would
 		// misbehave silently. Give it up: held commands fail with a clear error and the agent opens a new tab.

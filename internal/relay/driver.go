@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -1157,9 +1158,30 @@ func (a *Agent) act(t int, q driveReq) (map[string]any, error) {
 			if r.Error != "" || json.Unmarshal(r.Result, &obj) != nil || obj.Result.ObjectID == "" {
 				return nil, errors.New("could not reach the file field")
 			}
-			if err := a.inputIn(t, sid, "DOM.setFileInputFiles", map[string]any{"files": q.Files, "objectId": obj.Result.ObjectID}); err != nil {
+			// The bytes go into the page, not the paths: a file Chrome got by path from an extension's debugger is
+			// one the page can name and size but never read unless the extension may open file URLs.
+			files, err := uploadFiles(q.Files)
+			if err != nil {
 				return nil, err
 			}
+			r = a.cdpIn(p, t, sid, "Runtime.callFunctionOn", map[string]any{"objectId": obj.Result.ObjectID,
+				"functionDeclaration": setFilesJS, "arguments": []map[string]any{{"value": files}}, "returnByValue": true})
+			var set struct {
+				Result struct {
+					Value string `json:"value"`
+				} `json:"result"`
+			}
+			if r.Error != "" || json.Unmarshal(r.Result, &set) != nil {
+				return nil, fmt.Errorf("could not set the files: %s", cmp.Or(r.Error, "no answer"))
+			}
+			if set.Result.Value != "" {
+				return nil, errors.New(set.Result.Value)
+			}
+			names := make([]string, len(q.Files))
+			for i, f := range q.Files {
+				names[i] = filepath.Base(f)
+			}
+			a.s.audit(a, "upload", "tab", t, "files", names)
 		}
 		if q.Kind == "hover" {
 			if err := a.input(t, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": prep.X, "y": prep.Y}); err != nil {
